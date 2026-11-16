@@ -87,6 +87,7 @@ table.t input,table.t select{padding:4px 5px}
 .d-sub{font:13px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#64748b}
 /* interface only, never exported */
 .dev{cursor:pointer}
+.dev.drop .d-box{stroke:var(--sel);stroke-width:3}
 .dev.sel .d-box{stroke:var(--sel);stroke-width:3}
 .vm.sel .d-vm{stroke:var(--sel);stroke-width:2.5}
 .vm{cursor:pointer}

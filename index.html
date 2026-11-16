@@ -88,6 +88,7 @@ table.t input,table.t select{padding:4px 5px}
 .d-sub{font:13px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#64748b}
 /* interface only, never exported */
 .dev{cursor:pointer}
+.dev.drop .d-box{stroke:var(--sel);stroke-width:3}
 .dev.sel .d-box{stroke:var(--sel);stroke-width:3}
 .vm.sel .d-vm{stroke:var(--sel);stroke-width:2.5}
 .vm{cursor:pointer}
@@ -508,8 +509,6 @@ function drawInto(root, ui) {
       text(tg, t.x - d.x + t.w / 2, t.y - d.y + 15, "d-tabname", name, "middle");
       if (ui) tg.appendChild(Object.assign(document.createElementNS(NS, "title"), { textContent: `${name}: drag to a device to record a cable` }));
     }
-    if (ui && !tabs.length) el("circle", { cx: w / 2, cy: 0, r: 7, class: "handle", "data-handle": d.id }, g).appendChild(
-      Object.assign(document.createElementNS(NS, "title"), { textContent: "Drag to the switch or another device to record a cable" }));
   }
 }
 function renderSvg() {
@@ -520,7 +519,7 @@ function renderSvg() {
   const tips = hasContent()
     ? ["Solid line: cable.  Dashed line: Wi-Fi."]
     : ["Solid line: cable.  Dashed line: Wi-Fi.", "", "To record a cable, drag from a switch port,",
-      "a firewall interface, or the dot on top of a device,", "to the device on the other end.",
+      "a firewall interface or any device", "to the device on the other end.",
       "", "Select a device to enter its settings.", "Record only what you have built."];
   tips.forEach((s, i) => text(g, gx, 50 + i * 22, "ghint", s));
 }
@@ -534,17 +533,15 @@ function dropTarget(e) {
   return g ? { device: g.dataset.dev, port: p ? p.dataset.port : "" } : null;
 }
 svg.addEventListener("pointerdown", (e) => {
-  const port = e.target.closest("[data-port]"), hd = e.target.closest("[data-handle]");
-  if (port || hd) {
-    const from = port ? { device: port.dataset.pdev, port: port.dataset.port } : { device: hd.dataset.handle, port: "" };
+  const port = e.target.closest("[data-port]"), vmEl = e.target.closest("[data-vm]"), box = e.target.closest("[data-dev]");
+  if (vmEl) { select({ type: "dev", id: vmEl.dataset.vm }); return; }
+  // Press on a port or a device: a click selects it, a drag records a cable from it.
+  if (port || box) {
+    const from = port ? { device: port.dataset.pdev, port: port.dataset.port } : { device: box.dataset.dev, port: "" };
     const p = toSvg(e);
-    drag = { from, sx: e.clientX, sy: e.clientY, line: el("line", { x1: p.x, y1: p.y, x2: p.x, y2: p.y, class: "temp" }, svg) };
+    drag = { from, sx: e.clientX, sy: e.clientY, line: el("line", { x1: p.x, y1: p.y, x2: p.x, y2: p.y, class: "temp", style: "display:none" }, svg) };
     svg.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
-  const vmEl = e.target.closest("[data-vm]");
-  if (vmEl) { select({ type: "dev", id: vmEl.dataset.vm }); return; }
-  const g = e.target.closest("[data-dev]");
-  if (g) { select({ type: "dev", id: g.dataset.dev }); return; }
   const lk = e.target.closest("[data-link]");
   if (lk) { select({ type: "link", id: lk.dataset.link }); return; }
   if (sel) select(null);
@@ -552,6 +549,8 @@ svg.addEventListener("pointerdown", (e) => {
 svg.addEventListener("pointermove", (e) => {
   if (!drag) return;
   const p = toSvg(e);
+  if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
+  drag.line.style.display = "";
   drag.line.setAttribute("x2", p.x); drag.line.setAttribute("y2", p.y);
   svg.querySelectorAll(".drop").forEach((n) => n.classList.remove("drop"));
   const t = document.elementFromPoint(e.clientX, e.clientY);
@@ -776,7 +775,7 @@ function help() {
   ask("How to use the Network Diagram", [
     h("p", {}, "Your team records the network it has built on the rack: every cable, address, VLAN, route and policy. Each Cyber Hub page has an \u201cUpdate your network diagram\u201d box that says what to add."),
     h("div", { class: "sec" }, "Record a cable"),
-    h("p", {}, "Drag from a switch port, a firewall interface tab or the dot on top of a device, and drop it on the device at the other end. Dropping on a port records that port too."),
+    h("p", {}, "Drag from a switch port, a firewall interface tab or any device, and drop it on the device at the other end. Dropping on a port records that port too."),
     h("div", { class: "sec" }, "Enter settings"),
     h("p", {}, "Select a device to fill in its settings. List view shows everything as forms, which is faster for the switch ports."),
     h("div", { class: "sec" }, "Save and share"),
@@ -793,7 +792,7 @@ function renderPanel() {
   if (!s) {
     kids.push(h("h2", {}, "Your network diagram"),
       h("p", {}, "Record what your team has built on the rack: every cable, address, VLAN, route and policy. Update it at the end of every lab."),
-      h("p", {}, "Select a device to enter its settings. To record a cable, drag from a switch port, a firewall interface or the dot on top of a device to the device on the other end."),
+      h("p", {}, "Select a device to enter its settings. To record a cable, drag from a switch port, a firewall interface or any device to the device on the other end."),
       h("div", { class: "sec" }, "Add"),
       h("div", { class: "add" }, h("button", { onclick: () => addVM() }, "Virtual machine"), h("button", { onclick: () => addDevice("laptop") }, "Laptop")),
       h("div", { class: "sec" }, "When to update it"), whenList(),
@@ -804,7 +803,7 @@ function renderPanel() {
     kids.push(h("h2", {}, s.name || KINDS[s.kind]), h("p", { class: "kind" }, KINDS[s.kind] + (s.kind === "vm" ? " on " + (dev(s.host)?.name || "?") : "")));
     kids.push(...editor(s, renderPanel));
     kids.push(h("div", { class: "foot" },
-      s.kind !== "vm" ? h("button", { onclick: () => { const g = svg.querySelector(`[data-dev="${s.id}"] .handle`); toast("Drag from a switch port, a firewall interface or the dot on top of a device to the other end. You can also use List view."); g?.focus?.(); } }, "How do I connect it?") : null,
+      s.kind !== "vm" ? h("button", { onclick: () => { const g = svg.querySelector(`[data-dev="${s.id}"] .handle`); toast("Drag from a switch port, a firewall interface or the device itself to the other end. You can also use List view."); g?.focus?.(); } }, "How do I connect it?") : null,
       removable(s) ? h("button", { class: "danger", onclick: () => removeDevice(s) }, "Delete " + (s.kind === "vm" ? "VM" : "laptop")) : null));
   } else {
     kids.push(h("h2", {}, "Cable"), h("p", { class: "kind" }, `${dev(s.a.device)?.name} to ${dev(s.b.device)?.name}`));

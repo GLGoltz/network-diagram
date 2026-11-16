@@ -72,9 +72,14 @@ format hint for something that isn't an address. A format hint is not an answer.
 
 ## 5. Version 1: draw, save, share, export
 
-- **Canvas (SVG).** Drag devices. Drag from one device to another to make a link, then choose the port on each end
-  from a menu. Click a device or link to edit it in a side panel. Each device shows its name and, in amber, the
-  addresses entered. Each link shows its port and, for switch ports, mode and VLANs.
+- **Canvas (SVG), fixed layout.** Every rack has the same devices, so positions are fixed and follow the traffic
+  path top to bottom: ISP router (with the ISP-side laptop beside it), firewall (with the guest laptop beside it),
+  core switch, then the hosts in a row. Teams add only laptops and virtual machines, and cannot delete or move the
+  fixed devices. The switch is drawn with its ports XG1 to XG12 and OOB, each showing the mode and VLANs entered; the
+  firewall shows its interfaces as tabs on its edges. Cables plug into the recorded port and are routed at right
+  angles. To record a cable, drag from a port, an interface tab or the dot on top of a device to the other end.
+  Click a device or cable to edit it in a side panel.
+- **Reset diagram** button in the toolbar clears every setting and cable (undoable).
 - **List view.** A second tab with the same data as tables (devices, links, VLANs, ports, routes, policies), fully
   usable by keyboard. This is the accessible path and also the faster way to enter a port map.
 - **Undo and redo**, at least 50 steps.

@@ -73,7 +73,15 @@ table.t input,table.t select{padding:4px 5px}
 .d-val{font:14px ui-monospace,Consolas,Menlo,monospace;fill:#b45309}
 .d-vm{fill:#fff;stroke:#94a3b8;stroke-width:1}
 .d-vmname{font:600 13.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#0f172a}
-.d-link{stroke:#1e3a8a;stroke-width:2;fill:none}
+.d-link{stroke:#1e3a8a;stroke-width:2.25;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.d-port{fill:#f8fafc;stroke:#64748b;stroke-width:1.2}
+.port.off .d-port{fill:#e5e7eb;stroke:#94a3b8}
+.d-pname{font:700 12px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#0f172a}
+.d-pmode{font:10.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#475569}
+.d-pvl{font:10.5px ui-monospace,Consolas,Menlo,monospace;fill:#b45309}
+.d-tab{fill:#003366;stroke:#003366}
+.d-tabname{font:600 11.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#fff}
+.d-div{stroke:#e2e8f0;stroke-width:1}
 .d-link.wifi{stroke-dasharray:7 5}
 .d-lab{font:13px ui-monospace,Consolas,Menlo,monospace;fill:#1e3a8a;paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round}
 .d-title{font:700 20px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#003366}
@@ -83,9 +91,13 @@ table.t input,table.t select{padding:4px 5px}
 .dev.sel .d-box{stroke:var(--sel);stroke-width:3}
 .vm.sel .d-vm{stroke:var(--sel);stroke-width:2.5}
 .vm{cursor:pointer}
-.handle{fill:#fff;stroke:var(--navy);stroke-width:1.5;cursor:crosshair;opacity:0;transition:opacity .12s}
+.handle{fill:#fff;stroke:var(--navy);stroke-width:1.5;cursor:crosshair;opacity:.55;transition:opacity .12s}
 .dev:hover .handle,.dev.sel .handle,.dev:focus .handle{opacity:1}
 .hit{stroke:transparent;stroke-width:14;fill:none;cursor:pointer}
+.port{cursor:crosshair}
+.port:hover .d-port{stroke:var(--sel);stroke-width:2}
+.port:hover .d-tab{fill:#1e4f8a}
+.port.drop .d-port{stroke:var(--sel);stroke-width:2.5}
 .lk.sel .d-link{stroke:var(--sel);stroke-width:3}
 .temp{stroke:var(--sel);stroke-width:2;stroke-dasharray:4 4;fill:none;pointer-events:none}
 .drop .d-box{stroke:var(--sel);stroke-width:3}
@@ -105,12 +117,12 @@ table.t input,table.t select{padding:4px 5px}
   <button id="b-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
   <button id="b-share" class="primary">Copy share link<span class="dot" hidden></span></button>
   <button id="b-png">Export PNG</button>
+  <button id="b-reset" class="danger">Reset diagram</button>
   <div class="menu"><button id="b-more" aria-haspopup="true" aria-expanded="false">More</button>
    <div class="menu-list" id="more" hidden>
     <button id="b-json">Download .json backup</button>
     <button id="b-open">Open .json file</button>
     <button id="b-print">Print</button>
-    <button id="b-new">Start a new diagram</button>
    </div></div>
   <input type="file" id="file" accept=".json,application/json" hidden>
  </div>
@@ -125,7 +137,7 @@ table.t input,table.t select{padding:4px 5px}
 </main>
 <div class="toast" id="toast" role="status" hidden></div>
 <div class="modal" id="modal" hidden><div class="card" role="dialog" aria-modal="true" aria-labelledby="m-title"><h2 id="m-title"></h2><div id="m-body"></div><div class="m-acts" id="m-acts"></div></div></div>
-<script>// Network Diagram app, version 1: draw, save, share, export.
+<script>// Network Diagram app, version 1: record, save, share, export.
 //
 // Hard rule (DIAGRAM_APP_SPEC.md, section 2): this file holds no rack plan. No expected addresses, VLANs,
 // port assignments, routes or policies. Everything drawn comes from what the team typed. The only built-in
@@ -206,6 +218,8 @@ function normalize(x) {
     if (o.kind === "isp") { o.address ??= ""; o.mask ??= ""; }
     return o;
   });
+  // Every rack has the same devices: put back any that an older version let a team delete.
+  for (const f of blankDoc().devices) if (!d.devices.some((v) => v.id === f.id)) d.devices.push(f);
   const ids = new Set(d.devices.map((v) => v.id));
   d.links = (Array.isArray(x.links) ? x.links : []).filter((l) => l && ids.has(l.a?.device) && ids.has(l.b?.device))
     .map((l) => ({ id: String(l.id || newId("l")), a: { device: l.a.device, port: String(l.a.port || "") }, b: { device: l.b.device, port: String(l.b.port || "") } }));
@@ -265,6 +279,8 @@ const findSel = () => sel && (sel.type === "dev" ? dev(sel.id) : doc.links.find(
 function select(s) { sel = s; renderSvg(); renderPanel(); }
 
 // ------------------------------------------------------------------ drawing
+// The layout follows the lab's traffic path, top to bottom: ISP router, firewall, core switch, then the hosts.
+// The switch and firewall are drawn with their real ports; cables plug into the port they were recorded on.
 const el = (tag, attrs = {}, parent) => {
   const n = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== null) n.setAttribute(k, v);
@@ -279,8 +295,8 @@ function valueLines(d) {
   else if (d.kind === "firewall") { for (const i of d.interfaces) if (i.address) L.push(`${i.name} ${withPrefix(i.address, i.mask)}`); }
   else if (d.kind === "switch") {
     const s = d.svis.filter((v) => v.address || v.vlan);
-    s.slice(0, 5).forEach((v) => L.push(`VLAN ${v.vlan || "?"} ${withPrefix(v.address, v.mask)}`.trim()));
-    if (s.length > 5) L.push(`+${s.length - 5} more SVIs`);
+    s.slice(0, 6).forEach((v) => L.push(`VLAN ${v.vlan || "?"} ${withPrefix(v.address, v.mask)}`.trim()));
+    if (s.length > 6) L.push(`+${s.length - 6} more SVIs`);
     d.routes.filter((r) => r.dest).slice(0, 2).forEach((r) => L.push(`${r.dest} via ${r.nextHop || "?"}`));
     if (d.routes.length > 2) L.push(`+${d.routes.length - 2} more routes`);
   } else if (ENDPOINT.has(d.kind)) {
@@ -289,92 +305,185 @@ function valueLines(d) {
   }
   return L;
 }
-const VM_H = 42;
+
+// Geometry
+const VM_H = 42, PORT_W = 60, PORT_H = 54, PITCH = 66, OOB_GAP = 16, TAB_W = 64, TAB_H = 22;
+const SW_TEXT_W = 270, SW_W = 20 + 12 * PITCH + OOB_GAP + PORT_W + 26 + SW_TEXT_W;
+const HOST_W = 260, HOST_PITCH = 290, FW_W = 400;
 function boxSize(d) {
   const lines = valueLines(d).length;
+  if (d.kind === "switch") return { w: SW_W, h: Math.max(130, 46 + lines * 19) };
+  if (d.kind === "firewall") return { w: FW_W, h: Math.max(110, 66 + lines * 19) };
   let h = 42 + lines * 19 + (lines ? 8 : 0);
   if (d.kind === "hypervisor") h += vmsOf(d.id).length * (VM_H + 6) + (vmsOf(d.id).length ? 6 : 0);
-  return { w: BOX_W, h: Math.max(h, 84) };
-}
-function edgePoint(d, tx, ty) {
-  const { w, h } = boxSize(d), cx = d.x + w / 2, cy = d.y + h / 2, dx = tx - cx, dy = ty - cy;
-  if (!dx && !dy) return [cx, cy];
-  const s = Math.min(Math.abs((w / 2) / (dx || 1e-9)), Math.abs((h / 2) / (dy || 1e-9)));
-  return [cx + dx * s, cy + dy * s];
-}
-function layout() {
-  let y = 30;
-  const col = [...["hv", "nas", "pi", "lap"].map(dev).filter(Boolean),
-    ...doc.devices.filter((d) => d.kind !== "vm" && !FIXED.includes(d.id))];
-  for (const d of col) { d.x = 1300; d.y = y; y += boxSize(d).h + 30; }
-  const mid = 330, row = (id, x) => { const d = dev(id); if (d) { d.x = x; d.y = Math.round(mid - boxSize(d).h / 2); } };
-  row("isp", 30); row("fw", 360); row("sw", 860);
-  const low = (id, x) => { const d = dev(id); if (d) { d.x = x; d.y = 580; } };
-  low("isplap", 30); low("guest", 360);
-  VB.h = Math.max(hasContent() ? 720 : 800, y + 10);
-  svg.setAttribute("viewBox", `0 0 ${VB.w} ${VB.h}`);
+  return { w: d.kind === "isp" ? FW_W : HOST_W, h: Math.max(h, 80) };
 }
 const center = (d) => { const { w, h } = boxSize(d); return [d.x + w / 2, d.y + h / 2]; };
-function portLabel(d, port) {
-  if (!port) return "";
-  if (d.kind !== "switch") return port;
-  const p = d.ports.find((q) => q.name === port);
-  if (!p) return port;
-  const bits = [port];
-  if (p.mode === "access") bits.push("access" + (p.pvid ? " " + p.pvid : ""));
-  if (p.mode === "trunk") bits.push("trunk", (p.pvid ? "U" + p.pvid : "") + (p.tagged.length ? " T" + p.tagged.join(",") : ""));
-  if (p.shutdown) bits.push("shut");
-  return bits.filter(Boolean).join(" ");
+// Switch port square, in canvas coordinates
+function portRect(sw, name) {
+  const i = SW_PORTS.indexOf(name);
+  if (i < 0) return null;
+  const { h } = boxSize(sw);
+  const x = sw.x + 20 + i * PITCH + (name === "OOB" ? OOB_GAP : 0);
+  return { x, y: sw.y + (h - PORT_H) / 2, w: PORT_W, h: PORT_H, cx: x + PORT_W / 2 };
+}
+// Firewall interface tabs and the ISP router's LAN tab sit on the box edges
+function tabRect(d, name) {
+  const { w, h } = boxSize(d);
+  if (d.kind === "isp" && name === "LAN") return { x: d.x + 30, y: d.y + h - TAB_H / 2, w: TAB_W, h: TAB_H, side: "bottom" };
+  if (d.kind !== "firewall") return null;
+  if (name === "wan1") return { x: d.x + 30, y: d.y - TAB_H / 2, w: TAB_W, h: TAB_H, side: "top" };
+  if (name === "internal") return { x: d.x + 30, y: d.y + h - TAB_H / 2, w: TAB_W, h: TAB_H, side: "bottom" };
+  if (name === "dmz") return { x: d.x + 30 + PITCH, y: d.y + h - TAB_H / 2, w: TAB_W, h: TAB_H, side: "bottom" };
+  if (name === "guest Wi-Fi") return { x: d.x + w - 45, y: d.y + h / 2 - TAB_H / 2, w: 90, h: TAB_H, side: "right" };
+  return null;
+}
+
+// Positions are fixed: every rack has the same devices.
+function hosts() {
+  return [...["hv", "nas", "pi", "lap"].map(dev).filter(Boolean),
+    ...doc.devices.filter((d) => d.kind !== "vm" && !FIXED.includes(d.id))];
+}
+let lanes = new Map(); // link id -> y of its horizontal run below the switch
+function layout() {
+  const sw = dev("sw"), fw = dev("fw"), isp = dev("isp");
+  const SWX = 60;
+  if (isp) { isp.x = SWX - 12; isp.y = 30; }
+  const ispB = isp ? isp.y + boxSize(isp).h : 30;
+  if (fw) { fw.x = SWX - 12; fw.y = ispB + 74; }
+  const fwB = fw ? fw.y + boxSize(fw).h : ispB;
+  const side = (id, ref) => { const d = dev(id); if (d && ref) { d.x = ref.x + boxSize(ref).w + 150; d.y = ref.y + (boxSize(ref).h - boxSize(d).h) / 2; } };
+  side("isplap", isp); side("guest", fw);
+  if (sw) { sw.x = SWX; sw.y = fwB + 84; }
+  const swB = sw ? sw.y + boxSize(sw).h : fwB + 84;
+  const H = hosts();
+  H.forEach((d, i) => { d.x = SWX + i * HOST_PITCH; });
+  // Lanes for cables running down from the switch, so their horizontal runs never overlap.
+  lanes = new Map();
+  if (sw) {
+    const down = doc.links.map((l) => {
+      const [s, o] = l.a.device === "sw" ? [l.a, l.b] : l.b.device === "sw" ? [l.b, l.a] : [null, null];
+      const od = o && dev(o.device);
+      if (!s || !od || !H.includes(od)) return null;
+      const pr = portRect(sw, s.port), from = pr ? pr.cx : sw.x + SW_W / 2, to = od.x + HOST_W / 2 + spreadOffset(od, l);
+      return Math.abs(from - to) < 2 ? null : { l, from, to, lo: Math.min(from, to), hi: Math.max(from, to), left: to < from };
+    }).filter(Boolean);
+    const order = [...down.filter((c) => c.left).sort((a, b) => a.to - b.to), ...down.filter((c) => !c.left).sort((a, b) => b.to - a.to)];
+    const used = [];
+    for (const c of order) {
+      let k = 0;
+      while ((used[k] || []).some((u) => c.lo < u.hi + 14 && u.lo < c.hi + 14)) k++;
+      (used[k] ||= []).push(c); lanes.set(c.l.id, k);
+    }
+    const n = used.length;
+    for (const [id, k] of lanes) lanes.set(id, swB + 30 + k * 20);
+    const hostY = swB + 30 + Math.max(0, n - 1) * 20 + 46;
+    H.forEach((d) => { d.y = hostY; });
+    VB.w = Math.max(1320, SWX + H.length * HOST_PITCH + 30);
+  }
+  const bottom = Math.max(...doc.devices.filter((d) => d.kind !== "vm").map((d) => d.y + boxSize(d).h));
+  VB.h = bottom + (hasContent() ? 40 : 90);
+  svg.setAttribute("viewBox", `0 0 ${VB.w} ${VB.h}`);
+}
+// Several cables meeting one host side are spread apart
+function spreadOffset(d, l) {
+  // only cables arriving from above or below share a side
+  const mine = doc.links.filter((x) => (x.a.device === d.id || x.b.device === d.id) && (() => {
+    const o = dev(x.a.device === d.id ? x.b.device : x.a.device); if (!o) return false;
+    const [, oy] = center(o); return oy + 10 < d.y || oy - 10 > d.y + boxSize(d).h; })());
+  if (mine.length < 2) return 0;
+  const i = mine.indexOf(l);
+  return (i - (mine.length - 1) / 2) * 26;
+}
+
+// Where a cable meets a device: the recorded port if there is one, else the side facing the other end
+function anchor(d, port, other, l) {
+  const { w, h } = boxSize(d), [ox, oy] = center(other);
+  if (d.kind === "switch") {
+    const pr = portRect(d, port);
+    if (pr) return oy < d.y ? { x: pr.cx, y: pr.y, side: "top" } : { x: pr.cx, y: pr.y + pr.h, side: "bottom" };
+  }
+  const t = tabRect(d, port);
+  if (t && !(d.kind === "isp" && oy < d.y + h)) {
+    if (t.side === "top") return { x: t.x + t.w / 2, y: t.y, side: "top" };
+    if (t.side === "bottom") return { x: t.x + t.w / 2, y: t.y + t.h, side: "bottom" };
+    return { x: t.x + t.w, y: t.y + t.h / 2, side: "right" };
+  }
+  const off = (oy + 10 < d.y || oy - 10 > d.y + h) ? spreadOffset(d, l) : 0;
+  if (oy + 10 < d.y) return { x: d.x + w / 2 + off, y: d.y, side: "top" };
+  if (oy - 10 > d.y + h) return { x: d.x + w / 2 + off, y: d.y + h, side: "bottom" };
+  return ox < d.x ? { x: d.x, y: d.y + h / 2 + off, side: "left" } : { x: d.x + w, y: d.y + h / 2 + off, side: "right" };
+}
+function route(A, B, laneY) {
+  const V = (s) => s === "top" || s === "bottom";
+  let pts;
+  if (V(A.side) && V(B.side)) {
+    if (Math.abs(A.x - B.x) < 2) pts = [A, B];
+    else { const y = laneY ?? (A.y + B.y) / 2; pts = [A, { x: A.x, y }, { x: B.x, y }, B]; }
+  } else if (!V(A.side) && !V(B.side)) {
+    if (Math.abs(A.y - B.y) < 2) pts = [A, B];
+    else { const x = (A.x + B.x) / 2; pts = [A, { x, y: A.y }, { x, y: B.y }, B]; }
+  } else if (V(A.side)) pts = [A, { x: A.x, y: B.y }, B];
+  else pts = [A, { x: B.x, y: A.y }, B];
+  // rounded corners
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p = pts[i], a = pts[i - 1], b = pts[i + 1];
+    const r = Math.min(10, Math.hypot(p.x - a.x, p.y - a.y) / 2, Math.hypot(b.x - p.x, b.y - p.y) / 2);
+    const ux = Math.sign(p.x - a.x), uy = Math.sign(p.y - a.y), vx = Math.sign(b.x - p.x), vy = Math.sign(b.y - p.y);
+    d += ` L${p.x - ux * r},${p.y - uy * r} Q${p.x},${p.y} ${p.x + vx * r},${p.y + vy * r}`;
+  }
+  const z = pts[pts.length - 1];
+  return d + ` L${z.x},${z.y}`;
 }
 const isWifi = (l) => [l.a, l.b].some((e) => e.port === "guest Wi-Fi");
+function portMode(p) {
+  if (p.shutdown) return ["off", ""];
+  if (p.mode === "access") return ["access", p.pvid || ""];
+  if (p.mode === "trunk") { const v = [p.pvid, p.tagged.join(",")].filter(Boolean).join("|"); return ["trunk", v.length > 9 ? v.slice(0, 8) + "…" : v]; }
+  return ["", ""];
+}
 
 function drawInto(root, ui) {
+  layout();
   const gl = el("g", {}, root), gd = el("g", {}, root);
-  const pairKey = (l) => [l.a.device, l.b.device].sort().join("|");
-  const groups = new Map();
-  for (const l of doc.links) { const k = pairKey(l); groups.set(k, [...(groups.get(k) || []), l]); }
   for (const l of doc.links) {
     const A = dev(l.a.device), B = dev(l.b.device);
-    if (!A || !B) continue;
-    const grp = groups.get(pairKey(l)), gi = grp.indexOf(l), off = (gi - (grp.length - 1) / 2) * 22;
-    const [cax, cay] = center(A), [cbx, cby] = center(B);
-    const L0 = Math.hypot(cbx - cax, cby - cay) || 1;
-    // perpendicular, oriented the same way for both directions of a pair
-    const flip = l.a.device < l.b.device ? 1 : -1;
-    const px = (-(cby - cay) / L0) * off * flip, py = ((cbx - cax) / L0) * off * flip;
-    const ea = edgePoint(A, cbx + px, cby + py), eb = edgePoint(B, cax + px, cay + py);
-    const x1 = ea[0] + px, y1 = ea[1] + py, x2 = eb[0] + px, y2 = eb[1] + py;
+    if (!A || !B || A.kind === "vm" || B.kind === "vm") continue;
+    const pa = anchor(A, l.a.port, B, l), pb = anchor(B, l.b.port, A, l);
+    const path = route(pa, pb, lanes.get(l.id));
     const g = el("g", { class: "lk" + (ui && sel?.type === "link" && sel.id === l.id ? " sel" : ""), "data-link": l.id }, gl);
-    el("line", { x1, y1, x2, y2, class: "d-link" + (isWifi(l) ? " wifi" : "") }, g);
-    if (ui) el("line", { x1, y1, x2, y2, class: "hit" }, g);
-    const len = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / len, uy = (y2 - y1) / len;
-    // label side: the side away from the pair's other cables, else above (or right of) the line
-    let nx = -uy, ny = ux;
-    const want = off !== 0 ? Math.sign(off) * flip : (Math.abs(ux) > 0.4 ? (ny < 0 ? 1 : -1) : (nx > 0 ? 1 : -1));
-    nx *= want; ny *= want;
-    const label = (s2, x, y, dx, dy) => {
-      if (!s2) return;
-      const bx2 = x + dx * 10 + nx * 7, by2 = y + dy * 10 + ny * 7 + (ny > 0.3 ? 11 : ny < -0.3 ? -2 : 4);
-      const anchor = Math.abs(dx) > 0.4 ? (dx > 0 ? "start" : "end") : (nx >= 0 ? "start" : "end");
-      text(g, bx2, by2, "d-lab", s2, anchor);
-    };
-    const la = portLabel(A, l.a.port), lb = portLabel(B, l.b.port);
-    label(la, x1, y1, ux, uy);
-    // On a short cable the two labels would meet in the middle, so put the far one on the other side.
-    if (grp.length === 1 && la && lb && (la.length + lb.length) * 7.8 + 36 > len * Math.max(Math.abs(ux), 0.2)) { nx = -nx; ny = -ny; }
-    label(lb, x2, y2, -ux, -uy);
+    el("path", { d: path, class: "d-link" + (isWifi(l) ? " wifi" : "") }, g);
+    if (ui) el("path", { d: path, class: "hit" }, g);
   }
   for (const d of doc.devices) {
     if (d.kind === "vm") continue;
     const { w, h } = boxSize(d);
-    const g = el("g", { class: "dev" + (ui && sel?.type === "dev" && sel.id === d.id ? " sel" : ""), "data-dev": d.id,
+    const g = el("g", { class: "dev k-" + d.kind + (ui && sel?.type === "dev" && sel.id === d.id ? " sel" : ""), "data-dev": d.id,
       transform: `translate(${d.x},${d.y})`, ...(ui ? { tabindex: 0, role: "button", "aria-label": `${d.name}, ${KINDS[d.kind]}` } : {}) }, gd);
-    el("rect", { width: w, height: h, rx: 9, class: "d-box" + (d.kind === "isp" ? " fixed" : "") }, g);
-    const lines = valueLines(d), alone = !lines.length && !(d.kind === "hypervisor" && vmsOf(d.id).length);
-    text(g, w / 2, alone ? h / 2 + 6 : 28, "d-name", d.name || KINDS[d.kind], "middle");
-    lines.forEach((s, i) => text(g, w / 2, 51 + i * 19, "d-val", s, "middle"));
+    el("rect", { width: w, height: h, rx: 10, class: "d-box" + (d.kind === "isp" ? " fixed" : "") }, g);
+    const lines = valueLines(d);
+    if (d.kind === "switch") {
+      const tx = w - SW_TEXT_W + 6;
+      el("line", { x1: tx - 14, y1: 14, x2: tx - 14, y2: h - 14, class: "d-div" }, g);
+      text(g, tx, 30, "d-name", d.name, "start");
+      lines.forEach((s, i) => text(g, tx, 52 + i * 19, "d-val", s, "start"));
+      for (const p of d.ports) {
+        const r = portRect(d, p.name), [mode, vl] = portMode(p);
+        const pg = el("g", { class: "port" + (p.shutdown ? " off" : ""), ...(ui ? { "data-port": p.name, "data-pdev": d.id } : {}) }, g);
+        el("rect", { x: r.x - d.x, y: r.y - d.y, width: r.w, height: r.h, rx: 5, class: "d-port" }, pg);
+        text(pg, r.cx - d.x, r.y - d.y + 16, "d-pname", p.name, "middle");
+        if (mode) text(pg, r.cx - d.x, r.y - d.y + 31, "d-pmode", mode, "middle");
+        if (vl) text(pg, r.cx - d.x, r.y - d.y + 45, "d-pvl", vl, "middle");
+        if (ui) pg.appendChild(Object.assign(document.createElementNS(NS, "title"), { textContent: `${p.name}: drag to a device to record a cable` }));
+      }
+      continue;
+    }
+    const alone = !lines.length && !(d.kind === "hypervisor" && vmsOf(d.id).length);
+    text(g, w / 2, alone ? h / 2 + 6 : 30, "d-name", d.name || KINDS[d.kind], "middle");
+    lines.forEach((s, i) => text(g, w / 2, 53 + i * 19, "d-val", s, "middle"));
     if (d.kind === "hypervisor") {
-      let y = 42 + lines.length * 19 + (lines.length ? 8 : 0) + 2;
+      let y = 44 + lines.length * 19 + (lines.length ? 8 : 0) + 2;
       for (const v of vmsOf(d.id)) {
         const vg = el("g", { class: "vm" + (ui && sel?.type === "dev" && sel.id === v.id ? " sel" : ""), "data-vm": v.id,
           ...(ui ? { tabindex: 0, role: "button", "aria-label": `${v.name}, virtual machine` } : {}) }, g);
@@ -385,34 +494,49 @@ function drawInto(root, ui) {
         y += VM_H + 6;
       }
     }
-    if (ui) el("circle", { cx: w, cy: h / 2, r: 7, class: "handle", "data-handle": d.id }, g).appendChild(
-      Object.assign(document.createElementNS(NS, "title"), { textContent: "Drag to another device to connect them" }));
+    const tabs = d.kind === "firewall" ? FW_IFS : d.kind === "isp" ? ["LAN"] : [];
+    for (const name of tabs) {
+      const t = tabRect(d, name);
+      const tg = el("g", { class: "port", ...(ui ? { "data-port": name, "data-pdev": d.id } : {}) }, g);
+      el("rect", { x: t.x - d.x, y: t.y - d.y, width: t.w, height: t.h, rx: 4, class: "d-tab" }, tg);
+      text(tg, t.x - d.x + t.w / 2, t.y - d.y + 15, "d-tabname", name, "middle");
+      if (ui) tg.appendChild(Object.assign(document.createElementNS(NS, "title"), { textContent: `${name}: drag to a device to record a cable` }));
+    }
+    if (ui && !tabs.length) el("circle", { cx: w / 2, cy: 0, r: 7, class: "handle", "data-handle": d.id }, g).appendChild(
+      Object.assign(document.createElementNS(NS, "title"), { textContent: "Drag to the switch or another device to record a cable" }));
   }
 }
 function renderSvg() {
-  layout();
   svg.replaceChildren();
   drawInto(svg, true);
-  if (!hasContent()) {
-    const g = el("g", { class: "ghint" }, svg);
-    ["Drag from the dot on a device's right edge to another device to record a cable.",
-      "Select a device to enter its addresses, VLANs, routes and policies.",
-      "Record only what you have built. Update it at the end of every lab."].forEach((s, i) => text(g, 40, VB.h - 72 + i * 24, "ghint", s));
-  }
+  const sw = dev("sw");
+  const gx = (dev("guest")?.x ?? 600) + HOST_W + 60, g = el("g", { class: "ghint" }, svg);
+  const tips = hasContent()
+    ? ["Solid line: cable.  Dashed line: Wi-Fi."]
+    : ["Solid line: cable.  Dashed line: Wi-Fi.", "", "To record a cable, drag from a switch port,",
+      "a firewall interface, or the dot on top of a device,", "to the device on the other end.",
+      "", "Select a device to enter its settings.", "Record only what you have built."];
+  tips.forEach((s, i) => text(g, gx, 50 + i * 22, "ghint", s));
 }
 
 // ------------------------------------------------------------------ canvas interaction
 const toSvg = (e) => { const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); };
 let drag = null;
+function dropTarget(e) {
+  const t = document.elementFromPoint(e.clientX, e.clientY);
+  const p = t?.closest("[data-port]"), g = t?.closest("[data-dev]");
+  return g ? { device: g.dataset.dev, port: p ? p.dataset.port : "" } : null;
+}
 svg.addEventListener("pointerdown", (e) => {
-  const h = e.target.closest("[data-handle]");
-  if (h) {
-    const d = dev(h.dataset.handle), [x, y] = center(d);
-    drag = { mode: "link", from: d.id, line: el("line", { x1: x, y1: y, x2: x, y2: y, class: "temp" }, svg) };
+  const port = e.target.closest("[data-port]"), hd = e.target.closest("[data-handle]");
+  if (port || hd) {
+    const from = port ? { device: port.dataset.pdev, port: port.dataset.port } : { device: hd.dataset.handle, port: "" };
+    const p = toSvg(e);
+    drag = { from, sx: e.clientX, sy: e.clientY, line: el("line", { x1: p.x, y1: p.y, x2: p.x, y2: p.y, class: "temp" }, svg) };
     svg.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
   const vmEl = e.target.closest("[data-vm]");
-  if (vmEl) { select({ type: "dev", id: vmEl.dataset.vm }); e.stopPropagation(); return; }
+  if (vmEl) { select({ type: "dev", id: vmEl.dataset.vm }); return; }
   const g = e.target.closest("[data-dev]");
   if (g) { select({ type: "dev", id: g.dataset.dev }); return; }
   const lk = e.target.closest("[data-link]");
@@ -422,19 +546,19 @@ svg.addEventListener("pointerdown", (e) => {
 svg.addEventListener("pointermove", (e) => {
   if (!drag) return;
   const p = toSvg(e);
-  {
-    drag.line.setAttribute("x2", p.x); drag.line.setAttribute("y2", p.y);
-    svg.querySelectorAll(".drop").forEach((n) => n.classList.remove("drop"));
-    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-dev]");
-    if (over && over.dataset.dev !== drag.from) over.classList.add("drop");
-  }
+  drag.line.setAttribute("x2", p.x); drag.line.setAttribute("y2", p.y);
+  svg.querySelectorAll(".drop").forEach((n) => n.classList.remove("drop"));
+  const t = document.elementFromPoint(e.clientX, e.clientY);
+  const target = t?.closest("[data-port]") || t?.closest("[data-dev]");
+  if (target && (target.dataset.dev || target.dataset.pdev) !== drag.from.device) target.classList.add("drop");
 });
 svg.addEventListener("pointerup", (e) => {
   if (!drag) return;
   const dr = drag; drag = null;
   dr.line.remove();
-  const over = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-dev]");
-  if (over && over.dataset.dev !== dr.from) addLink(dr.from, over.dataset.dev); else renderSvg();
+  const to = dropTarget(e);
+  if (Math.hypot(e.clientX - dr.sx, e.clientY - dr.sy) < 6) { select({ type: "dev", id: dr.from.device }); return; }
+  if (to && to.device !== dr.from.device) addLink(dr.from, to); else renderSvg();
 });
 svg.addEventListener("keydown", (e) => {
   const g = e.target.closest?.("[data-vm]") || e.target.closest?.("[data-dev]");
@@ -442,13 +566,16 @@ svg.addEventListener("keydown", (e) => {
   const id = g.dataset.vm || g.dataset.dev;
   if (e.key === "Enter" || e.key === " ") {
     e.preventDefault(); select({ type: "dev", id });
-    svg.querySelector(g.dataset.vm ? `[data-vm="${id}"]` : `[data-dev="${id}"]`)?.focus(); return;
+    svg.querySelector(g.dataset.vm ? `[data-vm="${id}"]` : `[data-dev="${id}"]`)?.focus();
   }
 });
 function addLink(a, b) {
-  const l = { id: newId("l"), a: { device: a, port: "" }, b: { device: b, port: "" } };
+  const used = (e) => e.port && doc.links.some((l) => [l.a, l.b].some((x) => x.device === e.device && x.port === e.port));
+  if (used(a) || used(b)) toast(`${used(a) ? a.port : b.port} already has a cable. Recorded anyway; check the port.`);
+  const l = { id: newId("l"), a: { ...a }, b: { ...b } };
   doc.links.push(l); commit(); select({ type: "link", id: l.id });
-  toast("Cable recorded. Choose the port on each end.");
+  if (!used(a) && !used(b)) toast(portsFor(dev(a.device)).length && !a.port || portsFor(dev(b.device)).length && !b.port
+    ? "Cable recorded. Choose the port it uses." : "Cable recorded.");
 }
 
 // ------------------------------------------------------------------ form helpers
@@ -630,7 +757,7 @@ function renderPanel() {
   if (!s) {
     kids.push(h("h2", {}, "Your network diagram"),
       h("p", {}, "Record what your team has built on the rack: every cable, address, VLAN, route and policy. Update it at the end of every lab."),
-      h("p", {}, "Select a device to edit it. To record a cable, drag from the dot on a device's right edge to another device."),
+      h("p", {}, "Select a device to enter its settings. To record a cable, drag from a switch port, a firewall interface or the dot on top of a device to the device on the other end."),
       h("div", { class: "sec" }, "Add"),
       h("div", { class: "add" }, h("button", { onclick: () => addVM() }, "Virtual machine"), h("button", { onclick: () => addDevice("laptop") }, "Laptop")),
       h("div", { class: "sec" }, "Summary"),
@@ -639,7 +766,7 @@ function renderPanel() {
     kids.push(h("h2", {}, s.name || KINDS[s.kind]), h("p", { class: "kind" }, KINDS[s.kind] + (s.kind === "vm" ? " on " + (dev(s.host)?.name || "?") : "")));
     kids.push(...editor(s, renderPanel));
     kids.push(h("div", { class: "foot" },
-      s.kind !== "vm" ? h("button", { onclick: () => { const g = svg.querySelector(`[data-dev="${s.id}"] .handle`); toast("Drag from the dot on its right edge to another device, or use List view."); g?.focus?.(); } }, "How do I connect it?") : null,
+      s.kind !== "vm" ? h("button", { onclick: () => { const g = svg.querySelector(`[data-dev="${s.id}"] .handle`); toast("Drag from a switch port, a firewall interface or the dot on top of a device to the other end. You can also use List view."); g?.focus?.(); } }, "How do I connect it?") : null,
       removable(s) ? h("button", { class: "danger", onclick: () => removeDevice(s) }, "Delete " + (s.kind === "vm" ? "VM" : "laptop")) : null));
   } else {
     kids.push(h("h2", {}, "Cable"), h("p", { class: "kind" }, `${dev(s.a.device)?.name} to ${dev(s.b.device)?.name}`));
@@ -782,8 +909,8 @@ $("file").onchange = async (e) => {
   catch { toast("That file isn't a diagram backup."); }
 };
 $("b-print").onclick = () => { setView("canvas"); setTimeout(() => print(), 50); };
-$("b-new").onclick = () => ask("Start a new diagram?", [h("p", {}, "This clears the diagram in this browser. Copy the share link first if you want to keep it."), h("p", { class: "muted" }, "You can undo this.")],
-  [["Cancel"], ["Start new", () => { doc = blankDoc(); sel = null; sharedJSON = null; commit(); renderAll(); }, "danger"]]);
+$("b-reset").onclick = () => ask("Reset the diagram?", [h("p", {}, "This clears every cable, address and setting and leaves the devices empty. Copy the share link first if you want to keep this version."), h("p", { class: "muted" }, "You can undo this.")],
+  [["Cancel"], ["Reset", () => { const co = doc.meta.company; doc = blankDoc(); doc.meta.company = co; sel = null; sharedJSON = null; commit(); renderAll(); }, "danger"]]);
 $("company").addEventListener("input", (e) => { doc.meta.company = e.target.value; });
 $("company").addEventListener("change", commit);
 document.addEventListener("keydown", (e) => {

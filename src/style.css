@@ -72,7 +72,15 @@ table.t input,table.t select{padding:4px 5px}
 .d-val{font:14px ui-monospace,Consolas,Menlo,monospace;fill:#b45309}
 .d-vm{fill:#fff;stroke:#94a3b8;stroke-width:1}
 .d-vmname{font:600 13.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#0f172a}
-.d-link{stroke:#1e3a8a;stroke-width:2;fill:none}
+.d-link{stroke:#1e3a8a;stroke-width:2.25;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.d-port{fill:#f8fafc;stroke:#64748b;stroke-width:1.2}
+.port.off .d-port{fill:#e5e7eb;stroke:#94a3b8}
+.d-pname{font:700 12px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#0f172a}
+.d-pmode{font:10.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#475569}
+.d-pvl{font:10.5px ui-monospace,Consolas,Menlo,monospace;fill:#b45309}
+.d-tab{fill:#003366;stroke:#003366}
+.d-tabname{font:600 11.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#fff}
+.d-div{stroke:#e2e8f0;stroke-width:1}
 .d-link.wifi{stroke-dasharray:7 5}
 .d-lab{font:13px ui-monospace,Consolas,Menlo,monospace;fill:#1e3a8a;paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round}
 .d-title{font:700 20px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#003366}
@@ -82,9 +90,13 @@ table.t input,table.t select{padding:4px 5px}
 .dev.sel .d-box{stroke:var(--sel);stroke-width:3}
 .vm.sel .d-vm{stroke:var(--sel);stroke-width:2.5}
 .vm{cursor:pointer}
-.handle{fill:#fff;stroke:var(--navy);stroke-width:1.5;cursor:crosshair;opacity:0;transition:opacity .12s}
+.handle{fill:#fff;stroke:var(--navy);stroke-width:1.5;cursor:crosshair;opacity:.55;transition:opacity .12s}
 .dev:hover .handle,.dev.sel .handle,.dev:focus .handle{opacity:1}
 .hit{stroke:transparent;stroke-width:14;fill:none;cursor:pointer}
+.port{cursor:crosshair}
+.port:hover .d-port{stroke:var(--sel);stroke-width:2}
+.port:hover .d-tab{fill:#1e4f8a}
+.port.drop .d-port{stroke:var(--sel);stroke-width:2.5}
 .lk.sel .d-link{stroke:var(--sel);stroke-width:3}
 .temp{stroke:var(--sel);stroke-width:2;stroke-dasharray:4 4;fill:none;pointer-events:none}
 .drop .d-box{stroke:var(--sel);stroke-width:3}

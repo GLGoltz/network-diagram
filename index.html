@@ -104,6 +104,10 @@ table.t input,table.t select{padding:4px 5px}
 .ghint{font:15px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#64748b}
 @media (max-width:900px){.main{flex-direction:column}.panel{width:auto;border-left:0;border-top:1px solid var(--border)}}
 @media print{.bar,.savebar,.panel,.toast,.modal{display:none!important}.main{display:block}.stage{padding:0;overflow:visible}#svg{border:0;min-width:0}.handle,.ghint{display:none}.dev.sel .d-box{stroke:#003366;stroke-width:1.5}}
+.when{margin:0 0 10px;padding-left:18px;font-size:13px;line-height:1.45}
+.when li{margin:0 0 5px}
+.modal .card{max-height:88vh;overflow:auto}
+.hit{stroke-width:10}
 </style></head><body>
 <header class="bar">
  <div class="brand"><b>Network Diagram</b><small>Cyber Hub</small></div>
@@ -113,6 +117,7 @@ table.t input,table.t select{padding:4px 5px}
   <button role="tab" id="t-list" aria-selected="false">List</button>
  </div>
  <div class="acts">
+  <button id="b-help">How to use</button>
   <button id="b-undo" title="Undo (Ctrl+Z)">Undo</button>
   <button id="b-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
   <button id="b-share" class="primary">Copy share link<span class="dot" hidden></span></button>
@@ -446,7 +451,8 @@ function portMode(p) {
 
 function drawInto(root, ui) {
   layout();
-  const gl = el("g", {}, root), gd = el("g", {}, root);
+  // Devices first, cables on top: a cable runs across the switch's face into its port square.
+  const gd = el("g", {}, root), gl = el("g", {}, root);
   for (const l of doc.links) {
     const A = dev(l.a.device), B = dev(l.b.device);
     if (!A || !B || A.kind === "vm" || B.kind === "vm") continue;
@@ -750,6 +756,36 @@ function removeDevice(d) {
     }, "danger"]]);
 }
 
+// What to record, lab by lab. Mirrors the "Update your network diagram" box on each Cyber Hub page. No values.
+const WHEN = [
+  ["Cyber Hub 00", "Open the app, type your company name, copy the share link and paste it on your Team Log cover page."],
+  ["Cyber Hub 02", "ISP router address, firewall interface addresses and static routes, and the ISP router to wan1 cable."],
+  ["Cyber Hub 03", "Firewall policies, virtual IPs and administrative access; the guest Wi-Fi interface, its SSID and the guest laptop."],
+  ["Cyber Hub 04", "The switch's VLANs, VLAN interfaces (SVIs) and static route."],
+  ["Cyber Hub 05", "Every switch port's settings, the DHCP pools, the firewall to switch cables, and your laptop's cable."],
+  ["Cyber Hub 06", "The NAS: address, gateway and its cable."],
+  ["Cyber Hub 07", "The hypervisor: address, gateway and its cable."],
+  ["Cyber Hub 08", "The web server VM, and the ISP-side laptop with its cable."],
+  ["Cyber Hub 09", "The FTP server VM."],
+  ["Cyber Hub 10", "The scanner VM and its firewall policy."],
+  ["Cyber Hub 11", "The vulnerable Pi: address and its cable."],
+  ["Cyber Hub 13", "Every fix you made. Then export a PNG for your SSP."],
+];
+const whenList = () => h("ol", { class: "when" }, WHEN.map(([k, v]) => h("li", {}, h("b", {}, k + ": "), v)));
+function help() {
+  ask("How to use the Network Diagram", [
+    h("p", {}, "Your team records the network it has built on the rack: every cable, address, VLAN, route and policy. Each Cyber Hub page has an \u201cUpdate your network diagram\u201d box that says what to add."),
+    h("div", { class: "sec" }, "Record a cable"),
+    h("p", {}, "Drag from a switch port, a firewall interface tab or the dot on top of a device, and drop it on the device at the other end. Dropping on a port records that port too."),
+    h("div", { class: "sec" }, "Enter settings"),
+    h("p", {}, "Select a device to fill in its settings. List view shows everything as forms, which is faster for the switch ports."),
+    h("div", { class: "sec" }, "Save and share"),
+    h("p", {}, "The diagram saves in this browser, but the share link is the real save. After each update, choose Copy share link and paste it on your Team Log cover page, replacing the old one. Export PNG makes the image for your SSP."),
+    h("div", { class: "sec" }, "When to update it"), whenList(),
+    h("p", { class: "muted" }, "Record only what you have built. The app never checks your work against the right answers: test on the rack."),
+  ], [["Close"]]);
+}
+
 function renderPanel() {
   const top = panel.scrollTop;
   const s = findSel();
@@ -760,6 +796,8 @@ function renderPanel() {
       h("p", {}, "Select a device to enter its settings. To record a cable, drag from a switch port, a firewall interface or the dot on top of a device to the device on the other end."),
       h("div", { class: "sec" }, "Add"),
       h("div", { class: "add" }, h("button", { onclick: () => addVM() }, "Virtual machine"), h("button", { onclick: () => addDevice("laptop") }, "Laptop")),
+      h("div", { class: "sec" }, "When to update it"), whenList(),
+      h("p", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); help(); } }, "How to use the Network Diagram")),
       h("div", { class: "sec" }, "Summary"),
       h("p", { class: "muted" }, `${doc.devices.filter((d) => d.kind !== "vm").length} devices, ${doc.devices.filter((d) => d.kind === "vm").length} virtual machines, ${doc.links.length} cables.`));
   } else if (sel.type === "dev") {
@@ -885,7 +923,7 @@ function ask(title, body, buttons) {
   $("m-title").textContent = title; $("m-body").replaceChildren(...body);
   const close = () => { m.hidden = true; prev?.focus?.(); };
   $("m-acts").replaceChildren(...buttons.map(([label, fn, cls]) => h("button", { class: cls || (fn ? "primary" : ""), onclick: () => { close(); fn?.(); } }, label)));
-  m.hidden = false; $("m-acts").lastChild?.focus();
+  m.hidden = false; $("m-acts").lastChild?.focus({ preventScroll: true }); m.querySelector(".card").scrollTop = 0;
   m.onkeydown = (e) => { if (e.key === "Escape") close(); };
 }
 function load(o, why) {
@@ -896,6 +934,7 @@ function load(o, why) {
 $("t-canvas").onclick = () => setView("canvas");
 $("t-list").onclick = () => setView("list");
 $("b-undo").onclick = undo; $("b-redo").onclick = redo;
+$("b-help").onclick = help;
 $("b-share").onclick = share; $("b-png").onclick = exportPng;
 const more = $("more");
 $("b-more").onclick = (e) => { e.stopPropagation(); more.hidden = !more.hidden; $("b-more").setAttribute("aria-expanded", !more.hidden); };

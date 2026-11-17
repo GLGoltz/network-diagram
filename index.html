@@ -217,7 +217,7 @@ const SW_PORTS = ["XG1","XG2","XG3","XG4","XG5","XG6","XG7","XG8","XG9","XG10","
 const FW_IFS = ["wan1", "internal", "dmz", "guest Wi-Fi"];
 const SERVICES = ["ALL", "PING", "HTTP", "HTTPS", "SSH", "FTP", "DNS"];
 const KINDS = {
-  isp: "ISP router", firewall: "Firewall", switch: "Switch", hypervisor: "Hypervisor", nas: "NAS",
+  isp: "Provider", firewall: "Firewall", switch: "Switch", hypervisor: "Hypervisor", nas: "NAS",
   pi: "Raspberry Pi", laptop: "Laptop", vm: "Virtual machine",
 };
 const ENDPOINT = new Set(["hypervisor", "nas", "pi", "laptop", "vm"]);
@@ -236,8 +236,8 @@ function blankDoc() {
   return {
     v: SCHEMA, meta: { company: "", updated: null },
     devices: [
-      { id: "isp", kind: "isp", name: "ISP router", address: "", mask: "" },
-      { id: "isplap", kind: "laptop", name: "ISP-side laptop", ...ep() },
+      { id: "isp", kind: "isp", name: "Provider (instructor rack)", address: "", mask: "" },
+      { id: "isplap", kind: "laptop", name: "Internet laptop", ...ep() },
       { id: "fw", kind: "firewall", name: "Firewall", hostname: "",
         interfaces: FW_IFS.map((n) => ({ name: n, address: "", mask: "", ...(n === "guest Wi-Fi" ? { ssid: "" } : {}) })),
         routes: [], vips: [], policies: [] },
@@ -257,7 +257,7 @@ function blankDoc() {
 let doc = blankDoc();
 const dev = (id) => doc.devices.find((d) => d.id === id);
 const vmsOf = (id) => doc.devices.filter((d) => d.kind === "vm" && d.host === id);
-const ISP_PORTS = ["LAN 1", "LAN 2"];
+const ISP_PORTS = ["Uplink", "Internet"];
 // The one network port on each single-port device, named as the device names it
 const NIC = { hv: "NIC 1", nas: "LAN 1", pi: "eth0", admin: "Ethernet", lap: "Ethernet", isplap: "Ethernet", guest: "Wi-Fi" };
 const portsFor = (d) => d.kind === "switch" ? SW_PORTS : d.kind === "firewall" ? FW_IFS : d.kind === "isp" ? ISP_PORTS : [];
@@ -292,7 +292,9 @@ function normalize(x) {
   const ids = new Set(d.devices.filter((v) => v.kind !== "vm").map((v) => v.id));
   d.links = (Array.isArray(x.links) ? x.links : []).filter((l) => l && ids.has(l.a?.device) && ids.has(l.b?.device) && l.a.device !== l.b.device)
     .map((l) => {
-      const fix = (e, o) => ({ device: e.device, port: e.device === "isp" && (e.port === "LAN" || !e.port) ? (o.device === "fw" ? "LAN 1" : "LAN 2") : String(e.port || "") });
+      // Saves from before the instructor-rack upstream used LAN, LAN 1 and LAN 2 on the ISP router.
+      const OLD = { "LAN 1": "Uplink", "LAN 2": "Internet" };
+      const fix = (e, o) => ({ device: e.device, port: e.device === "isp" ? (OLD[e.port] || (ISP_PORTS.includes(e.port) ? e.port : o.device === "fw" ? "Uplink" : "Internet")) : String(e.port || "") });
       return { id: String(l.id || newId("l")), a: fix(l.a, l.b), b: fix(l.b, l.a) };
     });
   return d;
@@ -349,7 +351,7 @@ const findSel = () => sel && (sel.type === "dev" ? dev(sel.id) : doc.links.find(
 function select(s) { sel = s; renderSvg(); renderPanel(); }
 
 // ------------------------------------------------------------------ drawing
-// The layout follows the lab's traffic path, top to bottom: ISP router, firewall, core switch, then the hosts.
+// The layout follows the lab's traffic path, top to bottom: provider, firewall, core switch, then the hosts.
 // The switch and firewall are drawn with their real ports, and cables plug into the port they were recorded on.
 const el = (tag, attrs = {}, parent) => {
   const n = document.createElementNS(NS, tag);
@@ -400,12 +402,12 @@ function portRect(sw, name) {
   const x = sw.x + 20 + i * PITCH + (name === "OOB" ? OOB_GAP : 0);
   return { x, y: sw.y + (h - PORT_H) / 2, w: PORT_W, h: PORT_H, cx: x + PORT_W / 2 };
 }
-// Firewall interface tabs and the ISP router's LAN tab sit on the box edges
+// Firewall interface tabs and the provider's Uplink and Internet tabs sit on the box edges
 function tabRect(d, name) {
   const { w, h } = boxSize(d);
   if (d.kind === "isp") {
-    if (name === "LAN 1") return { x: d.x + 30, y: d.y + h - TAB_H / 2, w: TAB_W, h: TAB_H, side: "bottom" };
-    if (name === "LAN 2") return { x: d.x + w - 32, y: d.y + h / 2 - TAB_H / 2, w: TAB_W, h: TAB_H, side: "right" };
+    if (name === "Uplink") return { x: d.x + 30, y: d.y + h - TAB_H / 2, w: TAB_W, h: TAB_H, side: "bottom" };
+    if (name === "Internet") return { x: d.x + w - 32, y: d.y + h / 2 - TAB_H / 2, w: TAB_W, h: TAB_H, side: "right" };
     return null;
   }
   if (ENDPOINT.has(d.kind) && d.kind !== "vm") {
@@ -632,7 +634,7 @@ function drawInto(root, ui) {
       const t = tabRect(d, name), on = single ? doc.links.some((l) => l.a.device === d.id || l.b.device === d.id) : connected.has(d.id + "|" + name);
       const tg = el("g", { class: "port" + (on ? " on" : ""), ...(ui ? { "data-port": name, "data-pdev": d.id } : {}) }, g);
       el("rect", { x: t.x - d.x, y: t.y - d.y, width: t.w, height: t.h, rx: 4, class: "d-tab" }, tg);
-      text(tg, t.x - d.x + t.w / 2, t.y - d.y + 15, "d-tabname", d.kind === "isp" ? "LAN" : name, "middle");
+      text(tg, t.x - d.x + t.w / 2, t.y - d.y + 15, "d-tabname", name, "middle");
     }
   }
   for (const l of doc.links) {
@@ -714,7 +716,6 @@ svg.addEventListener("keydown", (e) => {
   svg.querySelector(g.dataset.vm ? `[data-vm="${id}"]` : `[data-dev="${id}"]`)?.focus();
 });
 // A port, or a device with a single network port, holds one cable. A new cable replaces the old one.
-// The ISP router's LAN side has several ports, so it never replaces.
 function occupied(end, except) {
   const d = dev(end.device);
   if (!d) return [];
@@ -919,7 +920,7 @@ function addressRows() {
   const mask = (o) => (o.address && o.mask ? prefixToMask(o.mask) : "");
   const add = (d, iface, vlan, o, gw) => R.push({ d, host: d.hostname || "", iface, vlan: vlan || "", ip: ip(o), mask: mask(o), gw: gw || "" });
   const isp = dev("isp"), fw = dev("fw"), sw = dev("sw");
-  add(isp, "LAN", "", isp, "");
+  add(isp, "Uplink", "", isp, "");
   for (const i of fw.interfaces) add(fw, i.name, "", i, "");
   add(sw, "OOB", "", sw.oob, "");
   const svis = [...sw.svis].sort((a, b) => (+a.vlan || 0) - (+b.vlan || 0));

@@ -49,7 +49,7 @@ app can produce, and confirm none states a correct value.
 One JSON document, with a `v` (schema version) field. Everything is optional so a diagram can be half finished.
 
 - **devices[]**: `id`, `kind`, `name`, `x`, `y`, plus kind-specific fields.
-  - The device set is fixed, because every rack is built the same way: ISP router, ISP-side laptop, firewall, guest
+  - The device set is fixed, because every rack is built the same way: provider (the instructor rack), Internet laptop, firewall, guest
     laptop, core switch, hypervisor with three VM slots (web server, FTP server, scanner), NAS, admin laptop,
     vulnerable Pi and team laptop. Nothing is added, deleted or moved.
   - **Endpoint** (laptop, NAS, Pi, hypervisor host, VM): `hostname`, `address`, `mask`, `gateway`, `dhcp`.
@@ -61,7 +61,9 @@ One JSON document, with a `v` (schema version) field. Everything is optional so 
     `routes[]` (`dest`, `gateway`, `interface`), `vips[]` (`name`, `external`, `port`, `mapped`),
     `policies[]` (`name`, `from`, `to`, `source`, `dest`, `services[]`, `nat`, `log`), guest Wi-Fi as an interface
     with `ssid`.
-  - **ISP router**: `address`, `mask`.
+  - **Provider** (the instructor rack, which plays the internet provider): `address`, `mask` for its side of the
+    rack's uplink. Ports `Uplink` (to wan1) and `Internet` (to the Internet laptop). Older saves that used `LAN`,
+    `LAN 1` and `LAN 2` are mapped to these on load.
 - **links[]**: `id`, `a` and `b`, each `{device, port}`. `port` is a switch port name, a firewall interface name, or
   blank for a single-port endpoint. A VM has no link; it rides the hypervisor's link. The guest laptop's link to the
   firewall is wireless (drawn dashed).
@@ -73,7 +75,7 @@ format hint for something that isn't an address. A format hint is not an answer.
 ## 5. Version 1: draw, save, share, export
 
 - **Canvas (SVG), fixed layout.** Every rack has the same devices, so positions are fixed and follow the traffic
-  path top to bottom: ISP router (with the ISP-side laptop beside it), firewall (with the guest laptop beside it),
+  path top to bottom: provider (with the Internet laptop beside it), firewall (with the guest laptop beside it),
   core switch, then the hosts in a row. Teams add only laptops and virtual machines, and cannot delete or move the
   fixed devices. The switch is drawn with its ports XG1 to XG12 and OOB, each showing the mode and VLANs entered; the
   firewall shows its interfaces as tabs on its edges. Cables plug into the recorded port and are routed at right
@@ -81,7 +83,7 @@ format hint for something that isn't an address. A format hint is not an answer.
   Click a device or cable to edit it in a side panel.
 - **Reset diagram** button in the toolbar clears every setting and cable (undoable).
 - **One cable per port.** A port, or a device with a single network port, holds one cable: recording a new one
-  replaces the old (undoable). The ISP router's LAN side has several ports and never replaces.
+  replaces the old (undoable).
 - **Cables** run at right angles around every box (an orthogonal path search), end in a plug seated in the port,
   and fan out from the switch in nested lanes so they never cross. Connected ports are shaded.
 - **Small screens:** the page never scrolls sideways; the diagram scrolls inside its own frame.
@@ -91,7 +93,7 @@ format hint for something that isn't an address. A format hint is not an answer.
   The SSP (Cyber Hub 13) starts its hardware inventory from this table.
   Selecting a row opens that device's editor. (This replaced an earlier List view.)
 - **Ports on every device.** Single-port devices show their one port as a labeled tab (NIC 1, LAN 1, eth0, Ethernet,
-  Wi-Fi). Cables start only from a port; clicking a box selects it. The ISP router has two LAN ports.
+  Wi-Fi). Cables start only from a port; clicking a box selects it. The provider has two ports, Uplink and Internet.
 - **Target screens:** laptops and tablets. Phones are not a target.
 - **Undo and redo**, at least 50 steps.
 - **Save.** Autosave to `localStorage` on every change, wrapped in try/catch. Show "Saved in this browser" with the time.
@@ -144,7 +146,8 @@ canvas, and lists each hop with what decided it. It stops at the first hop that 
   a tag: the trunk's untagged VLAN.
 - A firewall interface joins the VLAN of the switch port it is linked to.
 - A switch SVI is in its own VLAN.
-- Devices linked to the ISP router share one segment with the ISP router and the firewall's wan1.
+- The provider's Uplink port shares one segment with the firewall's wan1. Its Internet port is a separate network
+  (203.0.113.0/24 in the lab) that the provider routes to.
 - Guest laptops share one wireless segment with the firewall's guest interface.
 - No link drawn, a shut-down port, or two different VLANs: stop, and name which of the three it was.
 
@@ -172,7 +175,7 @@ canvas, and lists each hop with what decided it. It stops at the first hop that 
 6. If the matching policy has NAT on, note that the source becomes the egress interface's address.
 7. Deliver by layer 2 to the destination or the route's gateway.
 
-**At the ISP router.** It answers only for its own address. Anything else: end with "Leaves through the ISP
+**At the provider.** It answers only for its own address. Anything else: end with "Leaves through the provider
 router. The mock internet ends here."
 
 **The reply.** After a successful forward trace, check the return path with the same routing rules from the
@@ -201,9 +204,9 @@ Build a reference diagram for a made-up rack in the test suite only (never shipp
 | Data laptop, Ping, its own gateway | Passes |
 | Data laptop, Ping, Management SVI | Passes |
 | Data laptop, Ping and HTTPS, firewall internal address | Reaches the firewall (answer not predicted) |
-| Data laptop, Ping, ISP router | Passes, NAT noted |
+| Data laptop, Ping, provider | Passes, NAT noted |
 | Data laptop, HTTP, web server | Passes through Internal_to_DMZ |
-| ISP-side laptop, HTTP, firewall WAN address | Passes through the VIP to the web server |
+| Internet laptop, HTTP, firewall WAN address | Passes through the VIP to the web server |
 | Guest laptop, HTTP, web server | Passes |
 | Guest laptop, HTTPS, firewall internal address | "Can't predict" (rule 3) |
 | Guest laptop, Ping, NAS | Stops at the firewall: no policy |
@@ -215,10 +218,10 @@ Then break the reference one fault at a time and assert where each trace stops:
 
 | Fault | Expected |
 |---|---|
-| Switch default route removed | Ping to the ISP router stops at the switch; ping to the firewall internal address still passes |
+| Switch default route removed | Ping to the provider stops at the switch; ping to the firewall internal address still passes |
 | XG1 moved to the wrong VLAN | Ping to the firewall internal address stops at layer 2 |
-| Firewall route to the Data subnet removed | Ping to the ISP router stops at the firewall: no route back to the sender |
-| ISP router's address changed to another subnet | Ping to the ISP router: the request can't be delivered at layer 2 |
+| Firewall route to the Data subnet removed | Ping to the provider stops at the firewall: no route back to the sender |
+| provider's address changed to another subnet | Ping to the provider: the request can't be delivered at layer 2 |
 | Data laptop's gateway cleared | Ping to the NAS stops at the laptop: no gateway |
 | Web VM tag cleared | HTTP to the web server stops at layer 2 |
 | VLAN 40 removed from the trunk's tagged list | HTTP to the web server stops: trunk doesn't carry the tag |

@@ -49,15 +49,15 @@ app can produce, and confirm none states a correct value.
 One JSON document, with a `v` (schema version) field. Everything is optional so a diagram can be half finished.
 
 - **devices[]**: `id`, `kind`, `name`, `x`, `y`, plus kind-specific fields.
-  - Kinds, pre-placed on a new diagram with names only: ISP router, firewall, core switch, hypervisor, NAS,
-    vulnerable Pi, team laptop (Data), ISP-side laptop, guest laptop. Students can add: VM (inside the hypervisor),
-    laptop, generic device. They can delete or rename any device.
-  - **Endpoint** (laptop, NAS, Pi, hypervisor host, VM): `address`, `mask`, `gateway`, `dhcp` (true/false).
+  - The device set is fixed, because every rack is built the same way: ISP router, ISP-side laptop, firewall, guest
+    laptop, core switch, hypervisor with three VM slots (web server, FTP server, scanner), NAS, admin laptop,
+    vulnerable Pi and team laptop. Nothing is added, deleted or moved.
+  - **Endpoint** (laptop, NAS, Pi, hypervisor host, VM): `hostname`, `address`, `mask`, `gateway`, `dhcp`.
     A VM also has `vlanTag` (blank means untagged).
-  - **Switch**: `vlans[]` (`id`, `name`), `svis[]` (`vlan`, `address`, `mask`), `routes[]` (`dest`, `nextHop`),
+  - **Switch** (no separate VLAN list; ports carry their VLANs): `svis[]` (`vlan`, `address`, `mask`), `routes[]` (`dest`, `nextHop`),
     `ports[]` (`name`, `mode` access/trunk, `pvid`, `tagged[]`, `shutdown`), `dhcpPools[]` (`vlan`, `start`, `end`,
     `router`).
-  - **Firewall**: `interfaces[]` (`name`, `address`, `mask`, `access[]` of PING/HTTPS/SSH/HTTP),
+  - **Firewall** (no administrative access settings): `interfaces[]` (`name`, `address`, `mask`),
     `routes[]` (`dest`, `gateway`, `interface`), `vips[]` (`name`, `external`, `port`, `mapped`),
     `policies[]` (`name`, `from`, `to`, `source`, `dest`, `services[]`, `nat`, `log`), guest Wi-Fi as an interface
     with `ssid`.
@@ -80,6 +80,11 @@ format hint for something that isn't an address. A format hint is not an answer.
   angles. To record a cable, drag from a port, an interface tab or the dot on top of a device to the other end.
   Click a device or cable to edit it in a side panel.
 - **Reset diagram** button in the toolbar clears every setting and cable (undoable).
+- **One cable per port.** A port, or a device with a single network port, holds one cable: recording a new one
+  replaces the old (undoable). The ISP router's LAN side has several ports and never replaces.
+- **Cables** run at right angles around every box (an orthogonal path search), end in a plug seated in the port,
+  and fan out from the switch in nested lanes so they never cross. Connected ports are shaded.
+- **Small screens:** the page never scrolls sideways; the diagram scrolls inside its own frame.
 - **List view.** A second tab with the same data as tables (devices, links, VLANs, ports, routes, policies), fully
   usable by keyboard. This is the accessible path and also the faster way to enter a port map.
 - **Undo and redo**, at least 50 steps.
@@ -105,7 +110,6 @@ involved and can be clicked to select them. Checks:
 - Two devices on one VLAN with different masks.
 - A switch port used by two links, or a link to a port that is shut down.
 - An access port with tagged VLANs, or a trunk with no untagged VLAN.
-- A port, SVI, pool or VM tag that uses a VLAN missing from the switch's VLAN list.
 - A VM tag that the hypervisor's switch port doesn't carry.
 - A DHCP pool that overlaps a fixed address entered on the diagram.
 - A route whose next hop isn't on any connected network of that device.
@@ -150,8 +154,9 @@ canvas, and lists each hop with what decided it. It stops at the first hop that 
    through this interface".
 1. If the ingress is wan1 and the destination and service match a VIP: rewrite the destination to the VIP's
    mapped address, and note it as a hop.
-2. Destination is the ingress interface's own address: allowed only if that interface's access list includes the
-   service (Ping to PING, HTTPS to HTTPS, and so on). End of trace.
+2. Destination is the ingress interface's own address: the packet arrives. Whether the firewall answers depends on
+   administrative access, which the app does not record, so say "It reaches the firewall. Whether the firewall
+   answers depends on its administrative access: test it on the rack." End of trace.
 3. Destination is another address of the firewall, on a different interface: **do not decide.** Show "The app
    can't predict this one. Test it on the rack." FortiOS behavior here is subtle and guessing would mislead.
 4. Otherwise find the egress: connected subnets first, then the longest matching static route. No match: stop.
@@ -189,7 +194,7 @@ Build a reference diagram for a made-up rack in the test suite only (never shipp
 |---|---|
 | Data laptop, Ping, its own gateway | Passes |
 | Data laptop, Ping, Management SVI | Passes |
-| Data laptop, Ping and HTTPS, firewall internal address | Passes (access list) |
+| Data laptop, Ping and HTTPS, firewall internal address | Reaches the firewall (answer not predicted) |
 | Data laptop, Ping, ISP router | Passes, NAT noted |
 | Data laptop, HTTP, web server | Passes through Internal_to_DMZ |
 | ISP-side laptop, HTTP, firewall WAN address | Passes through the VIP to the web server |

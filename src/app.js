@@ -34,11 +34,11 @@ function blankDoc() {
     devices: [
       { id: "isp", kind: "isp", name: "ISP router", address: "", mask: "" },
       { id: "isplap", kind: "laptop", name: "ISP-side laptop", ...ep() },
-      { id: "fw", kind: "firewall", name: "Firewall",
+      { id: "fw", kind: "firewall", name: "Firewall", hostname: "",
         interfaces: FW_IFS.map((n) => ({ name: n, address: "", mask: "", ...(n === "guest Wi-Fi" ? { ssid: "" } : {}) })),
         routes: [], vips: [], policies: [] },
       { id: "guest", kind: "laptop", name: "Guest laptop", ...ep() },
-      { id: "sw", kind: "switch", name: "Core switch", oob: { address: "", mask: "" }, svis: [], routes: [], dhcpPools: [],
+      { id: "sw", kind: "switch", name: "Core switch", hostname: "", oob: { address: "", mask: "" }, svis: [], routes: [], dhcpPools: [],
         ports: SW_PORTS.map((n) => ({ name: n, mode: "", pvid: "", tagged: [], shutdown: false })) },
       { id: "hv", kind: "hypervisor", name: "Hypervisor", ...ep() },
       vm("vmweb", "Web server"), vm("vmftp", "FTP server"), vm("vmscan", "Scanner"),
@@ -620,6 +620,7 @@ function editor(d) {
     if (d.kind === "hypervisor") out.push(h("p", { class: "muted" }, "Select a virtual machine inside the hypervisor to fill in its settings."));
   }
   if (d.kind === "isp") out.push(addrRow(d));
+  if (d.kind === "switch" || d.kind === "firewall") out.push(field("Hostname", inp(d, "hostname", { ph: "hostname", label: "Hostname" })));
   if (d.kind === "switch") {
     out.push(sec("Out-of-band (OOB) port"), addrRow(d.oob, "OOB"));
     out.push(sec("VLAN interfaces (SVIs)"), ...rows(d.svis, [{ key: "vlan", label: "VLAN", kind: "num", w: "20%" }, { key: "address", label: "Address", kind: "ip", ph: "a.b.c.d" }, { key: "mask", label: "Mask", kind: "mask", w: "20%", ph: "/nn" }], () => ({ vlan: "", address: "", mask: "" }), "VLAN interface"));
@@ -712,7 +713,7 @@ function addressRows() {
   const R = [];
   const ip = (o) => o.address || (o.dhcp ? "DHCP" : "");
   const mask = (o) => (o.address && o.mask ? prefixToMask(o.mask) : "");
-  const add = (d, iface, vlan, o, gw) => R.push({ d, iface, vlan: vlan || "", ip: ip(o), mask: mask(o), gw: gw || "" });
+  const add = (d, iface, vlan, o, gw) => R.push({ d, host: d.hostname || "", iface, vlan: vlan || "", ip: ip(o), mask: mask(o), gw: gw || "" });
   const isp = dev("isp"), fw = dev("fw"), sw = dev("sw");
   add(isp, "LAN", "", isp, "");
   for (const i of fw.interfaces) add(fw, i.name, "", i, "");
@@ -764,8 +765,8 @@ async function copyTable(t) {
 function renderTable() {
   const top = tableView.scrollTop;
   const A = addressRows(), C = connectionRows();
-  const at = tableEl("Addressing table", ["Device", "Interface", "VLAN", "IP address", "Subnet mask", "Default gateway"], A,
-    (r, first) => [first ? r.d.name : "", r.iface, dash(r.vlan), dash(r.ip), dash(r.mask), dash(r.gw)], (r) => r.d.id);
+  const at = tableEl("Addressing table", ["Device", "Hostname", "Interface", "VLAN", "IP address", "Subnet mask", "Default gateway"], A,
+    (r, first) => [first ? r.d.name : "", first && r.d.kind !== "isp" ? dash(r.host) : "", r.iface, dash(r.vlan), dash(r.ip), dash(r.mask), dash(r.gw)], (r) => r.d.id, "addr");
   const ct = C.length ? tableEl("Connections", ["Device", "Port", "Connects to", "Port", "Mode", "VLANs"], C,
     (r, first) => [r.A.name, dash(r.pa), r.B.name, dash(r.pb), dash(r.mode), dash(r.vlans)], (r) => r.A.id + r.pa, "conn")
     : h("p", { class: "muted" }, "No cables recorded yet.");

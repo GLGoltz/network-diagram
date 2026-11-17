@@ -54,10 +54,10 @@ One JSON document, with a `v` (schema version) field. Everything is optional so 
     vulnerable Pi and team laptop. Nothing is added, deleted or moved.
   - **Endpoint** (laptop, NAS, Pi, hypervisor host, VM): `hostname`, `address`, `mask`, `gateway`, `dhcp`.
     A VM also has `vlanTag` (blank means untagged).
-  - **Switch** (no separate VLAN list; ports carry their VLANs): `svis[]` (`vlan`, `address`, `mask`), `routes[]` (`dest`, `nextHop`),
+  - **Switch** (no separate VLAN list; ports carry their VLANs): `hostname`, `svis[]` (`vlan`, `address`, `mask`), `routes[]` (`dest`, `nextHop`),
     `ports[]` (`name`, `mode` access/trunk, `pvid`, `tagged[]`, `shutdown`), `dhcpPools[]` (`vlan`, `start`, `end`,
     `router`).
-  - **Firewall** (no administrative access settings): `interfaces[]` (`name`, `address`, `mask`),
+  - **Firewall** (no administrative access settings): `hostname`, `interfaces[]` (`name`, `address`, `mask`),
     `routes[]` (`dest`, `gateway`, `interface`), `vips[]` (`name`, `external`, `port`, `mapped`),
     `policies[]` (`name`, `from`, `to`, `source`, `dest`, `services[]`, `nat`, `log`), guest Wi-Fi as an interface
     with `ssid`.
@@ -86,8 +86,9 @@ format hint for something that isn't an address. A format hint is not an answer.
   and fan out from the switch in nested lanes so they never cross. Connected ports are shaded.
 - **Small screens:** the page never scrolls sideways; the diagram scrolls inside its own frame.
 - **Addressing table.** A "Diagram | Addressing table" switch above the drawing. The table view lists every interface
-  (device, interface, VLAN, IP address, subnet mask, default gateway) and every cable (device, port, connects to,
+  (device, hostname, interface, VLAN, IP address, subnet mask, default gateway) and every cable (device, port, connects to,
   port, switch port mode and VLANs), built only from what the team entered, with a Copy table button for Google Docs.
+  The SSP (Cyber Hub 13) starts its hardware inventory from this table.
   Selecting a row opens that device's editor. (This replaced an earlier List view.)
 - **Ports on every device.** Single-port devices show their one port as a labeled tab (NIC 1, LAN 1, eth0, Ethernet,
   Wi-Fi). Cables start only from a port; clicking a box selects it. The ISP router has two LAN ports.

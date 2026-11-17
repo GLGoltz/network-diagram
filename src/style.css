@@ -51,7 +51,9 @@ table.topo tbody th{font-weight:600;color:var(--ink);white-space:nowrap}
 table.topo tr.grp td,table.topo tr.grp th{border-top:1px solid var(--border)}
 table.topo tbody tr{cursor:pointer}
 table.topo tbody tr:hover{background:#f8fafc}
-table.topo td:nth-child(n+3){font-family:ui-monospace,Consolas,Menlo,monospace;font-size:13px;color:var(--amber)}
+table.topo.addr td:nth-child(2),table.topo.addr td:nth-child(n+4){font-family:ui-monospace,Consolas,Menlo,monospace;font-size:13px;color:var(--amber)}
+table.topo td{white-space:nowrap}
+.tableview{overflow-x:auto}
 table.topo .blank{color:#cbd5e1}
 .list{flex:1;min-width:0;overflow:auto;padding:16px 20px}
 .panel{width:380px;flex:none;border-left:1px solid var(--border);background:#fff;overflow:auto;padding:16px}

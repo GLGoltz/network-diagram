@@ -62,8 +62,8 @@ One JSON document, with a `v` (schema version) field. Everything is optional so 
     `policies[]` (`name`, `from`, `to`, `source`, `dest`, `services[]`, `nat`, `log`), guest Wi-Fi as an interface
     with `ssid`.
   - **Provider** (the instructor rack, which plays the internet provider): `address`, `mask` for its side of the
-    rack's uplink. Ports `Uplink` (to wan1) and `Internet` (to the Internet laptop). Older saves that used `LAN`,
-    `LAN 1` and `LAN 2` are mapped to these on load.
+    rack's uplink. Ports `Uplink` (to wan1) and `Internet Wi-Fi` (to the Internet laptop, drawn dashed like the guest Wi-Fi). Older saves that used `LAN`,
+    `LAN 1` and `LAN 2` are mapped to these on load, as is the earlier `Internet`.
 - **links[]**: `id`, `a` and `b`, each `{device, port}`. `port` is a switch port name, a firewall interface name, or
   blank for a single-port endpoint. A VM has no link; it rides the hypervisor's link. The guest laptop's link to the
   firewall is wireless (drawn dashed).
@@ -93,7 +93,7 @@ format hint for something that isn't an address. A format hint is not an answer.
   The SSP (Cyber Hub 13) starts its hardware inventory from this table.
   Selecting a row opens that device's editor. (This replaced an earlier List view.)
 - **Ports on every device.** Single-port devices show their one port as a labeled tab (NIC 1, LAN 1, eth0, Ethernet,
-  Wi-Fi). Cables start only from a port; clicking a box selects it. The provider has two ports, Uplink and Internet.
+  Wi-Fi). Cables start only from a port; clicking a box selects it. The provider has two ports, Uplink and Internet Wi-Fi.
 - **Target screens:** laptops and tablets. Phones are not a target.
 - **Undo and redo**, at least 50 steps.
 - **Save.** Autosave to `localStorage` on every change, wrapped in try/catch. Show "Saved in this browser" with the time.
@@ -146,8 +146,8 @@ canvas, and lists each hop with what decided it. It stops at the first hop that 
   a tag: the trunk's untagged VLAN.
 - A firewall interface joins the VLAN of the switch port it is linked to.
 - A switch SVI is in its own VLAN.
-- The provider's Uplink port shares one segment with the firewall's wan1. Its Internet port is a separate network
-  (203.0.113.0/24 in the lab) that the provider routes to.
+- The provider's Uplink port shares one segment with the firewall's wan1. Its Internet Wi-Fi port is a separate
+  network (CyberHub-Internet, 198.51.100.0/24 in the lab) that the provider routes to.
 - Guest laptops share one wireless segment with the firewall's guest interface.
 - No link drawn, a shut-down port, or two different VLANs: stop, and name which of the three it was.
 

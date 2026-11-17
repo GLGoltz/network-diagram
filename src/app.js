@@ -19,7 +19,7 @@ const KINDS = {
 const ENDPOINT = new Set(["hypervisor", "nas", "pi", "laptop", "vm"]);
 
 const $ = (id) => document.getElementById(id);
-const svg = $("svg"), panel = $("panel"), listView = $("v-list");
+const svg = $("svg"), panel = $("panel"), tableView = $("v-table");
 const NS = "http://www.w3.org/2000/svg";
 
 // ------------------------------------------------------------------ document
@@ -38,7 +38,7 @@ function blankDoc() {
         interfaces: FW_IFS.map((n) => ({ name: n, address: "", mask: "", ...(n === "guest Wi-Fi" ? { ssid: "" } : {}) })),
         routes: [], vips: [], policies: [] },
       { id: "guest", kind: "laptop", name: "Guest laptop", ...ep() },
-      { id: "sw", kind: "switch", name: "Core switch", svis: [], routes: [], dhcpPools: [],
+      { id: "sw", kind: "switch", name: "Core switch", oob: { address: "", mask: "" }, svis: [], routes: [], dhcpPools: [],
         ports: SW_PORTS.map((n) => ({ name: n, mode: "", pvid: "", tagged: [], shutdown: false })) },
       { id: "hv", kind: "hypervisor", name: "Hypervisor", ...ep() },
       vm("vmweb", "Web server"), vm("vmftp", "FTP server"), vm("vmscan", "Scanner"),
@@ -53,7 +53,11 @@ function blankDoc() {
 let doc = blankDoc();
 const dev = (id) => doc.devices.find((d) => d.id === id);
 const vmsOf = (id) => doc.devices.filter((d) => d.kind === "vm" && d.host === id);
-const portsFor = (d) => d.kind === "switch" ? SW_PORTS : d.kind === "firewall" ? FW_IFS : d.kind === "isp" ? ["LAN"] : [];
+const ISP_PORTS = ["LAN 1", "LAN 2"];
+// The one network port on each single-port device, named as the device names it
+const NIC = { hv: "NIC 1", nas: "LAN 1", pi: "eth0", admin: "Ethernet", lap: "Ethernet", isplap: "Ethernet", guest: "Wi-Fi" };
+const portsFor = (d) => d.kind === "switch" ? SW_PORTS : d.kind === "firewall" ? FW_IFS : d.kind === "isp" ? ISP_PORTS : [];
+const nicOf = (d) => NIC[d.id] || "NIC";
 
 // Bring an older or hand-edited document into the fixed device set, keeping what the team entered.
 function normalize(x) {
@@ -70,6 +74,7 @@ function normalize(x) {
     if ("dhcp" in base) o.dhcp = !!v.dhcp;
     if (base.kind === "switch") {
       for (const k of ["svis", "routes", "dhcpPools"]) o[k] = Array.isArray(v[k]) ? v[k] : [];
+      o.oob = { address: String(v.oob?.address || ""), mask: String(v.oob?.mask || "") };
       const have = new Map((v.ports || []).map((p) => [p.name, p]));
       o.ports = base.ports.map((p) => { const q = have.get(p.name) || {}; return { ...p, mode: q.mode || "", pvid: String(q.pvid || ""), tagged: Array.isArray(q.tagged) ? q.tagged : [], shutdown: !!q.shutdown }; });
     }
@@ -82,7 +87,10 @@ function normalize(x) {
   });
   const ids = new Set(d.devices.filter((v) => v.kind !== "vm").map((v) => v.id));
   d.links = (Array.isArray(x.links) ? x.links : []).filter((l) => l && ids.has(l.a?.device) && ids.has(l.b?.device) && l.a.device !== l.b.device)
-    .map((l) => ({ id: String(l.id || newId("l")), a: { device: l.a.device, port: String(l.a.port || "") }, b: { device: l.b.device, port: String(l.b.port || "") } }));
+    .map((l) => {
+      const fix = (e, o) => ({ device: e.device, port: e.device === "isp" && (e.port === "LAN" || !e.port) ? (o.device === "fw" ? "LAN 1" : "LAN 2") : String(e.port || "") });
+      return { id: String(l.id || newId("l")), a: fix(l.a, l.b), b: fix(l.b, l.a) };
+    });
   return d;
 }
 
@@ -129,7 +137,7 @@ function restore(j) { doc = JSON.parse(j); doc.meta.updated = new Date().toISOSt
 const undo = () => { if (hi > 0) restore(hist[--hi]); };
 const redo = () => { if (hi < hist.length - 1) restore(hist[++hi]); };
 const hasContent = (o = doc) => o.links.length > 0 || o.devices.some((d) => d.address || d.gateway || d.dhcp || d.svis?.length ||
-  d.interfaces?.some((i) => i.address) || d.ports?.some((p) => p.mode || p.shutdown) || d.policies?.length);
+  d.interfaces?.some((i) => i.address) || d.oob?.address || d.ports?.some((p) => p.mode || p.shutdown) || d.policies?.length);
 
 // ------------------------------------------------------------------ selection
 let sel = null; // {type:'dev'|'link', id}
@@ -152,6 +160,7 @@ function valueLines(d) {
   if (d.kind === "isp") { if (d.address) L.push(withPrefix(d.address, d.mask)); }
   else if (d.kind === "firewall") { for (const i of d.interfaces) if (i.address) L.push(`${i.name} ${withPrefix(i.address, i.mask)}`); }
   else if (d.kind === "switch") {
+    if (d.oob?.address) L.push(`OOB ${withPrefix(d.oob.address, d.oob.mask)}`);
     const s = d.svis.filter((v) => v.address || v.vlan);
     s.slice(0, 6).forEach((v) => L.push(`VLAN ${v.vlan || "?"} ${withPrefix(v.address, v.mask)}`.trim()));
     if (s.length > 6) L.push(`+${s.length - 6} more VLAN interfaces`);
@@ -190,7 +199,16 @@ function portRect(sw, name) {
 // Firewall interface tabs and the ISP router's LAN tab sit on the box edges
 function tabRect(d, name) {
   const { w, h } = boxSize(d);
-  if (d.kind === "isp" && name === "LAN") return { x: d.x + 30, y: d.y + h - TAB_H / 2, w: TAB_W, h: TAB_H, side: "bottom" };
+  if (d.kind === "isp") {
+    if (name === "LAN 1") return { x: d.x + 30, y: d.y + h - TAB_H / 2, w: TAB_W, h: TAB_H, side: "bottom" };
+    if (name === "LAN 2") return { x: d.x + w - 32, y: d.y + h / 2 - TAB_H / 2, w: TAB_W, h: TAB_H, side: "right" };
+    return null;
+  }
+  if (ENDPOINT.has(d.kind) && d.kind !== "vm") {
+    const tw = 74;
+    if (d.id === "isplap" || d.id === "guest") return { x: d.x - tw + 32, y: d.y + h / 2 - TAB_H / 2, w: tw, h: TAB_H, side: "left" };
+    return { x: d.x + w / 2 - tw / 2, y: d.y - TAB_H / 2, w: tw, h: TAB_H, side: "top" };
+  }
   if (d.kind !== "firewall") return null;
   if (name === "wan1") return { x: d.x + 30, y: d.y - TAB_H / 2, w: TAB_W, h: TAB_H, side: "top" };
   if (name === "internal") return { x: d.x + 30, y: d.y + h - TAB_H / 2, w: TAB_W, h: TAB_H, side: "bottom" };
@@ -204,7 +222,7 @@ function layout() {
   const isp = dev("isp"), fw = dev("fw"), sw = dev("sw");
   put("isp", SWX - 12, 30);
   put("fw", SWX - 12, isp.y + boxSize(isp).h + 80);
-  const besides = (id, ref) => { const d = dev(id); d.x = ref.x + boxSize(ref).w + 170; d.y = ref.y + (boxSize(ref).h - boxSize(d).h) / 2; };
+  const besides = (id, ref) => { const d = dev(id); d.x = ref.x + boxSize(ref).w + 190; d.y = ref.y + (boxSize(ref).h - boxSize(d).h) / 2; };
   besides("isplap", isp); besides("guest", fw);
   put("sw", SWX, fw.y + boxSize(fw).h + 90);
   HOSTS.forEach((id, i) => put(id, SWX + i * HOST_PITCH, 0));
@@ -221,10 +239,11 @@ function anchor(d, port, other) {
     const pr = portRect(d, port);
     if (pr) return oy < d.y ? { x: pr.cx, y: pr.y, side: "top", inner: d.y, port: true } : { x: pr.cx, y: pr.y + pr.h, side: "bottom", inner: d.y + r.h, port: true };
   }
-  const t = tabRect(d, port);
-  if (t && !(d.kind === "isp" && oy < d.y + r.h)) {
+  const t = tabRect(d, portsFor(d).length ? port : nicOf(d));
+  if (t) {
     if (t.side === "top") return { x: t.x + t.w / 2, y: t.y, side: "top", port: true };
     if (t.side === "bottom") return { x: t.x + t.w / 2, y: t.y + t.h, side: "bottom", port: true };
+    if (t.side === "left") return { x: t.x, y: t.y + t.h / 2, side: "left", port: true };
     return { x: t.x + t.w, y: t.y + t.h / 2, side: "right", port: true };
   }
   if (oy < r.y) return { x: r.x + r.w / 2, y: r.y, side: "top" };
@@ -404,12 +423,12 @@ function drawInto(root, ui) {
         y += VM_H + 6;
       }
     }
-    const tabs = d.kind === "firewall" ? FW_IFS : d.kind === "isp" ? ["LAN"] : [];
+    const single = !portsFor(d).length, tabs = single ? [nicOf(d)] : portsFor(d);
     for (const name of tabs) {
-      const t = tabRect(d, name), on = connected.has(d.id + "|" + name);
+      const t = tabRect(d, name), on = single ? doc.links.some((l) => l.a.device === d.id || l.b.device === d.id) : connected.has(d.id + "|" + name);
       const tg = el("g", { class: "port" + (on ? " on" : ""), ...(ui ? { "data-port": name, "data-pdev": d.id } : {}) }, g);
       el("rect", { x: t.x - d.x, y: t.y - d.y, width: t.w, height: t.h, rx: 4, class: "d-tab" }, tg);
-      text(tg, t.x - d.x + t.w / 2, t.y - d.y + 15, "d-tabname", name, "middle");
+      text(tg, t.x - d.x + t.w / 2, t.y - d.y + 15, "d-tabname", d.kind === "isp" ? "LAN" : name, "middle");
     }
   }
   for (const l of doc.links) {
@@ -426,9 +445,10 @@ function drawInto(root, ui) {
 function renderSvg() {
   svg.replaceChildren();
   drawInto(svg, true);
+  if (view === "table") renderTable();
   const gx = dev("isplap").x + SIDE_W + 70;
   const tips = hasContent() ? ["Solid line: cable.  Dashed line: Wi-Fi."]
-    : ["Solid line: cable.  Dashed line: Wi-Fi.", "", "To record a cable, drag from a port or a", "device to the device at the other end.",
+    : ["Solid line: cable.  Dashed line: Wi-Fi.", "", "To record a cable, drag from a labeled port", "to the device at the other end.",
       "Select a device to enter its settings."];
   const g = el("g", {}, svg);
   tips.forEach((s, i) => text(g, gx, 56 + i * 22, "ghint", s));
@@ -440,14 +460,18 @@ let drag = null;
 function dropTarget(e) {
   const t = document.elementFromPoint(e.clientX, e.clientY);
   const p = t?.closest?.("[data-port]"), g = t?.closest?.("[data-dev]");
-  return g ? { device: g.dataset.dev, port: p ? p.dataset.port : "" } : null;
+  if (!g) return null;
+  const d = dev(g.dataset.dev);
+  return { device: d.id, port: p && portsFor(d).length ? p.dataset.port : "" };
 }
 svg.addEventListener("pointerdown", (e) => {
   const port = e.target.closest("[data-port]"), vmEl = e.target.closest("[data-vm]"), box = e.target.closest("[data-dev]");
   if (vmEl) { select({ type: "dev", id: vmEl.dataset.vm }); return; }
-  // Press on a port or a device: a click selects it, a drag records a cable from it.
-  if (port || box) {
-    const from = port ? { device: port.dataset.pdev, port: port.dataset.port } : { device: box.dataset.dev, port: "" };
+  // Cables start only at a port. A click on a port or a box selects the device.
+  if (box && !port) { select({ type: "dev", id: box.dataset.dev }); return; }
+  if (port) {
+    const pd = dev(port.dataset.pdev);
+    const from = { device: pd.id, port: portsFor(pd).length ? port.dataset.port : "" };
     const p = toSvg(e);
     drag = { from, sx: e.clientX, sy: e.clientY, line: el("line", { x1: p.x, y1: p.y, x2: p.x, y2: p.y, class: "temp", style: "display:none" }, svg) };
     svg.setPointerCapture(e.pointerId); e.preventDefault(); return;
@@ -489,12 +513,14 @@ svg.addEventListener("keydown", (e) => {
 // The ISP router's LAN side has several ports, so it never replaces.
 function occupied(end, except) {
   const d = dev(end.device);
-  if (!d || d.kind === "isp") return [];
+  if (!d) return [];
   const single = !portsFor(d).length;
   if (!single && !end.port) return [];
   return doc.links.filter((l) => l !== except && [l.a, l.b].some((x) => x.device === end.device && (single || x.port === end.port)));
 }
 function addLink(a, b) {
+  const auto = (e) => { const d = dev(e.device); if (portsFor(d).length && !e.port) { const free = portsFor(d).find((p) => !occupied({ device: d.id, port: p }).length); if (d.kind === "isp" && free) e.port = free; } };
+  auto(a); auto(b);
   const gone = [...new Set([...occupied(a), ...occupied(b)])];
   doc.links = doc.links.filter((l) => !gone.includes(l));
   const l = { id: newId("l"), a: { ...a }, b: { ...b } };
@@ -547,7 +573,7 @@ function inp(obj, key, { kind, ph, label } = {}) {
       check(s); commit(); renderSvg(); if (kind === "ip" && "mask" in obj) rerenderForms();
     } });
   function set(s, final) {
-    if (kind === "list") obj[key] = s.split(",").map((x) => x.trim()).filter(Boolean);
+    if (kind === "list") { const v = s.split(",").map((x) => x.trim()).filter(Boolean); obj[key] = final ? [...new Set(v)] : v; }
     else obj[key] = final ? s.trim() : s;
   }
   check(String(val));
@@ -578,7 +604,7 @@ function rows(arr, cols, make, label) {
         onclick: () => { arr.splice(i, 1); commit(); renderSvg(); rerenderForms(); } }, "✕"))))));
   return [t, h("button", { class: "small", onclick: () => { arr.push(make()); commit(); rerenderForms(); } }, "Add " + label)];
 }
-const rerenderForms = () => (view === "list" ? renderList() : renderPanel());
+const rerenderForms = () => renderPanel();
 const sec = (s) => h("div", { class: "sec" }, s);
 const addrRow = (o, label = "") => h("div", { class: "row2" },
   field("Address", inp(o, "address", { kind: "ip", ph: "a.b.c.d", label: (label + " address").trim() })),
@@ -595,6 +621,7 @@ function editor(d) {
   }
   if (d.kind === "isp") out.push(addrRow(d));
   if (d.kind === "switch") {
+    out.push(sec("Out-of-band (OOB) port"), addrRow(d.oob, "OOB"));
     out.push(sec("VLAN interfaces (SVIs)"), ...rows(d.svis, [{ key: "vlan", label: "VLAN", kind: "num", w: "20%" }, { key: "address", label: "Address", kind: "ip", ph: "a.b.c.d" }, { key: "mask", label: "Mask", kind: "mask", w: "20%", ph: "/nn" }], () => ({ vlan: "", address: "", mask: "" }), "VLAN interface"));
     out.push(sec("Static routes"), ...rows(d.routes, [{ key: "dest", label: "Destination", kind: "cidr", ph: "a.b.c.d/nn" }, { key: "nextHop", label: "Next hop", kind: "ip", ph: "a.b.c.d" }], () => ({ dest: "", nextHop: "" }), "route"));
     out.push(sec("Ports"));
@@ -643,9 +670,9 @@ function help() {
   ask("How to use the Network Diagram", [
     h("p", {}, "Your team records the network it has built on the rack. Each Cyber Hub page ends with an “Update your network diagram” box that says what to record from that lab."),
     sec("Record a cable"),
-    h("p", {}, "Drag from a switch port, a firewall interface or a device, and drop it on the other end. Dropping on a port records that port. A port that already has a cable gets the new one instead; Undo brings the old one back."),
+    h("p", {}, "Drag from a labeled port, such as a switch port or a firewall interface, and drop it on the device at the other end. Dropping on a port records that port. A port that already has a cable gets the new one instead; Undo brings the old one back."),
     sec("Enter settings"),
-    h("p", {}, "Select a device to fill in its settings, or a virtual machine inside the hypervisor. List view shows every device's settings on one page."),
+    h("p", {}, "Select a device to fill in its settings, or a virtual machine inside the hypervisor. The Addressing table tab lists every interface and cable you have entered, ready to copy into your Team Log or SSP."),
     sec("Save and share"),
     h("p", {}, "The diagram saves in this browser, but the share link is the real save. After each update, copy the share link and paste it over the old one on your Team Log cover page. Export PNG makes the image for your SSP."),
     h("p", { class: "muted" }, "The app shows only what you enter. It never checks your work against the lab plan, so test on the rack."),
@@ -659,7 +686,7 @@ function renderPanel() {
   if (!s) {
     kids.push(h("h2", {}, "Your network diagram"),
       h("p", {}, "Record what your team has built on the rack. Each Cyber Hub page says what to add."),
-      h("p", {}, "Select a device to enter its settings. To record a cable, drag from a port or a device to the device at the other end."),
+      h("p", {}, "Select a device to enter its settings. To record a cable, drag from a labeled port to the device at the other end."),
       h("p", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); help(); } }, "How to use the Network Diagram")));
   } else if (sel.type === "dev") {
     kids.push(h("h2", {}, s.name), h("p", { class: "kind" }, s.kind === "vm" ? "Virtual machine on the hypervisor" : KINDS[s.kind]));
@@ -673,37 +700,90 @@ function renderPanel() {
   panel.scrollTop = top;
 }
 
-// ------------------------------------------------------------------ list view
-function renderList() {
-  const top = listView.scrollTop;
-  const card = (d, sub) => h("div", { class: "card-b" }, h("h3", {}, h("span", {}, d.name), h("span", { class: "muted", style: "font-weight:400;font-size:12px" }, sub)), ...editor(d));
-  const cards = [];
-  for (const d of doc.devices) {
-    if (d.kind === "vm") continue;
-    cards.push(card(d, KINDS[d.kind]));
-    for (const v of vmsOf(d.id)) cards.push(card(v, "VM on " + d.name));
+// ------------------------------------------------------------------ addressing table
+// A read-only listing of what the team entered, laid out like a professional addressing table.
+function prefixToMask(p) {
+  const n = +p;
+  if (!/^\d{1,2}$/.test(String(p)) || n > 32) return "";
+  const bits = "1".repeat(n).padEnd(32, "0");
+  return [0, 8, 16, 24].map((i) => parseInt(bits.slice(i, i + 8), 2)).join(".");
+}
+function addressRows() {
+  const R = [];
+  const ip = (o) => o.address || (o.dhcp ? "DHCP" : "");
+  const mask = (o) => (o.address && o.mask ? prefixToMask(o.mask) : "");
+  const add = (d, iface, vlan, o, gw) => R.push({ d, iface, vlan: vlan || "", ip: ip(o), mask: mask(o), gw: gw || "" });
+  const isp = dev("isp"), fw = dev("fw"), sw = dev("sw");
+  add(isp, "LAN", "", isp, "");
+  for (const i of fw.interfaces) add(fw, i.name, "", i, "");
+  add(sw, "OOB", "", sw.oob, "");
+  const svis = [...sw.svis].sort((a, b) => (+a.vlan || 0) - (+b.vlan || 0));
+  if (svis.length) svis.forEach((v) => add(sw, "VLAN " + (v.vlan || "?"), v.vlan, v, ""));
+  else add(sw, "VLAN interfaces", "", {}, "");
+  for (const id of ["hv", "vmweb", "vmftp", "vmscan", "nas", "admin", "pi", "lap", "isplap", "guest"]) {
+    const d = dev(id);
+    add(d, d.kind === "vm" ? "net0" : nicOf(d), d.kind === "vm" ? d.vlanTag : "", d, d.gateway);
   }
-  const real = doc.devices.filter((d) => d.kind !== "vm");
-  const devSel = (l, end) => h("select", { "aria-label": "Device", onchange: (e) => { end.device = e.target.value; end.port = ""; commit(); renderSvg(); renderList(); } },
-    real.map((d) => h("option", { value: d.id, selected: end.device === d.id }, d.name)));
-  const links = h("div", { class: "card-b wide" }, h("h3", {}, "Cables"),
-    h("table", { class: "t" }, h("thead", {}, h("tr", {}, ["Device", "Port", "Device", "Port", ""].map((c) => h("th", {}, c)))),
-      h("tbody", {}, doc.links.map((l, i) => h("tr", {}, h("td", {}, devSel(l, l.a)), h("td", {}, portSelect(l, l.a)), h("td", {}, devSel(l, l.b)), h("td", {}, portSelect(l, l.b)),
-        h("td", {}, h("button", { class: "rowx small", "aria-label": `Remove cable ${i + 1}`, onclick: () => { doc.links.splice(i, 1); commit(); renderSvg(); renderList(); } }, "✕")))))),
-    h("button", { class: "small", onclick: () => { doc.links.push({ id: newId("l"), a: { device: "sw", port: "" }, b: { device: "fw", port: "" } }); commit(); renderSvg(); renderList(); } }, "Add cable"));
-  listView.replaceChildren(h("h2", {}, "Every device"),
-    h("p", { class: "muted" }, "The same settings as the diagram, on one page. Changes here show on the diagram right away."),
-    h("div", { class: "grid" }, links, ...cards));
-  listView.scrollTop = top;
+  return R;
+}
+function connectionRows() {
+  const sw = dev("sw"), order = (l) => {
+    const s = l.a.device === "sw" ? l.a : l.b.device === "sw" ? l.b : null;
+    return s ? SW_PORTS.indexOf(s.port) : 100 + doc.devices.findIndex((d) => d.id === l.a.device);
+  };
+  return [...doc.links].sort((x, y) => order(x) - order(y)).map((l) => {
+    let [a, b] = [l.a, l.b];
+    if (b.device === "sw" || (a.device !== "sw" && b.device === "fw")) [a, b] = [b, a];
+    const A = dev(a.device), B = dev(b.device);
+    const p = A.kind === "switch" ? A.ports.find((q) => q.name === a.port) : null;
+    const name = (D, e) => portsFor(D).length ? (e.port || "") : nicOf(D);
+    return { A, B, pa: name(A, a), pb: name(B, b), mode: p ? (p.shutdown ? "shut down" : p.mode) : "",
+      vlans: p && !p.shutdown ? (p.mode === "trunk" ? [p.pvid && p.pvid + " untagged", p.tagged.length && p.tagged.join(", ") + " tagged"].filter(Boolean).join("; ") : p.pvid) : "" };
+  });
+}
+const dash = (v) => (v ? v : h("span", { class: "blank" }, "—"));
+function tableEl(caption, cols, rowsData, cells, idOf, cls = "") {
+  return h("table", { class: "topo " + cls }, h("caption", {}, caption),
+    h("thead", {}, h("tr", {}, cols.map((c) => h("th", { scope: "col" }, c)))),
+    h("tbody", {}, rowsData.map((r, i) => {
+      const prev = rowsData[i - 1], first = !prev || idOf(prev) !== idOf(r);
+      return h("tr", { class: first ? "grp" : "", onclick: () => select({ type: "dev", id: (r.d || r.A).id }) }, cells(r, first).map((c, j) => h(j === 0 ? "th" : "td", j === 0 ? { scope: "row" } : {}, c)));
+    })));
+}
+async function copyTable(t) {
+  const html = '<table border="1" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:10pt">' + t.innerHTML.replace(/<caption>.*?<\/caption>/, "") + "</table>";
+  const plain = [...t.querySelectorAll("tr")].map((r) => [...r.children].map((c) => c.textContent.trim()).join("\t")).join("\n");
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([plain], { type: "text/plain" }) })]);
+  } catch {
+    const r = document.createRange(); r.selectNode(t); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    document.execCommand("copy"); s.removeAllRanges();
+  }
+  toast("Table copied. Paste it into your Team Log or SSP.");
+}
+function renderTable() {
+  const top = tableView.scrollTop;
+  const A = addressRows(), C = connectionRows();
+  const at = tableEl("Addressing table", ["Device", "Interface", "VLAN", "IP address", "Subnet mask", "Default gateway"], A,
+    (r, first) => [first ? r.d.name : "", r.iface, dash(r.vlan), dash(r.ip), dash(r.mask), dash(r.gw)], (r) => r.d.id);
+  const ct = C.length ? tableEl("Connections", ["Device", "Port", "Connects to", "Port", "Mode", "VLANs"], C,
+    (r, first) => [r.A.name, dash(r.pa), r.B.name, dash(r.pb), dash(r.mode), dash(r.vlans)], (r) => r.A.id + r.pa, "conn")
+    : h("p", { class: "muted" }, "No cables recorded yet.");
+  const head = (title, note, t) => h("div", { class: "thead" }, h("div", {}, h("h2", {}, title), h("p", { class: "muted" }, note)),
+    t.tagName === "TABLE" ? h("button", { class: "small", onclick: () => copyTable(t) }, "Copy table") : null);
+  tableView.replaceChildren(
+    head("Addressing table", "Every interface, from what you entered. Select a row to edit that device.", at), at,
+    head("Connections", "Every cable, with the switch port's mode and VLANs.", ct), ct);
+  tableView.scrollTop = top;
 }
 let view = "canvas";
 function setView(v) {
   view = v;
-  $("t-canvas").setAttribute("aria-selected", v === "canvas"); $("t-list").setAttribute("aria-selected", v === "list");
-  $("v-canvas").hidden = v !== "canvas"; panel.hidden = v !== "canvas"; listView.hidden = v !== "list";
-  if (v === "list") renderList(); else { renderSvg(); renderPanel(); }
+  $("t-canvas").setAttribute("aria-selected", v === "canvas"); $("t-table").setAttribute("aria-selected", v === "table");
+  $("v-canvas").hidden = v !== "canvas"; tableView.hidden = v !== "table";
+  renderSvg(); renderPanel();
 }
-function renderAll() { $("company").value = doc.meta.company || ""; renderSvg(); if (view === "list") renderList(); else renderPanel(); }
+function renderAll() { $("company").value = doc.meta.company || ""; renderSvg(); renderPanel(); }
 
 // ------------------------------------------------------------------ share links
 const b64u = (bytes) => { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
@@ -781,7 +861,7 @@ function load(o, why) {
 
 // ------------------------------------------------------------------ wiring
 $("t-canvas").onclick = () => setView("canvas");
-$("t-list").onclick = () => setView("list");
+$("t-table").onclick = () => setView("table");
 $("b-undo").onclick = undo; $("b-redo").onclick = redo;
 $("b-help").onclick = help;
 $("b-share").onclick = share; $("b-png").onclick = exportPng;

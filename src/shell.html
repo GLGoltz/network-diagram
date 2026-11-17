@@ -3,10 +3,6 @@
 <header class="bar">
  <div class="brand"><b>Network Diagram</b><small>Cyber Hub</small></div>
  <label class="company"><span>Company</span><input id="company" placeholder="Your company name" autocomplete="off"></label>
- <div class="seg" role="tablist" aria-label="View">
-  <button role="tab" id="t-canvas" aria-selected="true">Diagram</button>
-  <button role="tab" id="t-list" aria-selected="false">List</button>
- </div>
  <div class="acts">
   <button id="b-help">How to use</button>
   <button id="b-undo" title="Undo (Ctrl+Z)">Undo</button>
@@ -25,11 +21,17 @@
 </header>
 <div class="savebar"><span id="saved" role="status"></span><span class="sep">·</span><span>The share link is your real save. Copy it after each lab and paste it on your Team Log cover page.</span></div>
 <main class="main">
- <section class="stage" id="v-canvas">
-  <p class="scrollhint">Scroll sideways to see the whole diagram.</p>
-  <svg id="svg" viewBox="0 0 1600 800" role="application" aria-label="Network diagram. Select a device to edit it."></svg>
+ <section class="stage" id="stage">
+  <div class="viewtabs" role="tablist" aria-label="View">
+   <button role="tab" id="t-canvas" aria-selected="true">Diagram</button>
+   <button role="tab" id="t-table" aria-selected="false">Addressing table</button>
+  </div>
+  <div id="v-canvas">
+   <p class="scrollhint">Scroll sideways to see the whole diagram.</p>
+   <svg id="svg" viewBox="0 0 1600 800" role="application" aria-label="Network diagram. Select a device to edit it."></svg>
+  </div>
+  <div id="v-table" class="tableview" hidden></div>
  </section>
- <section class="list" id="v-list" hidden></section>
  <aside class="panel" id="panel" aria-label="Editor"></aside>
 </main>
 <div class="toast" id="toast" role="status" hidden></div>

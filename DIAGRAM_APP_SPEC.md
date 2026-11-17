@@ -85,8 +85,13 @@ format hint for something that isn't an address. A format hint is not an answer.
 - **Cables** run at right angles around every box (an orthogonal path search), end in a plug seated in the port,
   and fan out from the switch in nested lanes so they never cross. Connected ports are shaded.
 - **Small screens:** the page never scrolls sideways; the diagram scrolls inside its own frame.
-- **List view.** A second tab with the same data as tables (devices, links, VLANs, ports, routes, policies), fully
-  usable by keyboard. This is the accessible path and also the faster way to enter a port map.
+- **Addressing table.** A "Diagram | Addressing table" switch above the drawing. The table view lists every interface
+  (device, interface, VLAN, IP address, subnet mask, default gateway) and every cable (device, port, connects to,
+  port, switch port mode and VLANs), built only from what the team entered, with a Copy table button for Google Docs.
+  Selecting a row opens that device's editor. (This replaced an earlier List view.)
+- **Ports on every device.** Single-port devices show their one port as a labeled tab (NIC 1, LAN 1, eth0, Ethernet,
+  Wi-Fi). Cables start only from a port; clicking a box selects it. The ISP router has two LAN ports.
+- **Target screens:** laptops and tablets. Phones are not a target.
 - **Undo and redo**, at least 50 steps.
 - **Save.** Autosave to `localStorage` on every change, wrapped in try/catch. Show "Saved in this browser" with the time.
 - **Share link.** "Copy share link" encodes the whole document into the URL fragment (JSON, compressed with

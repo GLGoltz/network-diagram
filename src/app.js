@@ -387,9 +387,17 @@ function plug(g, a, wifi) {
 
 function drawInto(root, ui) {
   layout();
+  const lw = 150, lh = 80, lx = VB.w - lw - 20, ly = 16;
   if (doc.meta.logo) {
-    const lw = 150, lh = 80;
-    el("image", { href: doc.meta.logo, x: VB.w - lw - 20, y: 16, width: lw, height: lh, preserveAspectRatio: "xMaxYMin meet", class: "d-logo" }, root);
+    const g = el("g", ui ? { "data-logo": "1", class: "logo-slot", tabindex: 0, role: "button", "aria-label": "Company logo. Select to change or remove it." } : {}, root);
+    el("image", { href: doc.meta.logo, x: lx, y: ly, width: lw, height: lh, preserveAspectRatio: "xMaxYMin meet", class: "d-logo" }, g);
+    if (ui) el("rect", { x: lx, y: ly, width: lw, height: lh, class: "logo-hit" }, g);
+  } else if (ui) {
+    // A placeholder only on screen; exports leave the corner empty until a logo is added.
+    const g = el("g", { "data-logo": "1", class: "logo-slot empty", tabindex: 0, role: "button", "aria-label": "Upload your company logo" }, root);
+    el("rect", { x: lx, y: ly, width: lw, height: lh, rx: 8, class: "logo-ph" }, g);
+    text(g, lx + lw / 2, ly + 36, "logo-ph-t", "Upload logo", "middle");
+    text(g, lx + lw / 2, ly + 56, "logo-ph-s", "PNG or JPG", "middle");
   }
   const connected = new Set(doc.links.flatMap((l) => [l.a, l.b]).filter((e) => e.port).map((e) => e.device + "|" + e.port));
   const gd = el("g", {}, root), gl = el("g", {}, root);
@@ -472,7 +480,15 @@ function dropTarget(e) {
   const d = dev(g.dataset.dev);
   return { device: d.id, port: p && portsFor(d).length ? p.dataset.port : "" };
 }
+function logoClick() {
+  if (!doc.meta.logo) { $("logofile").click(); return; }
+  ask("Company logo", [h("img", { src: doc.meta.logo, alt: "Your company logo", class: "logoprev" })],
+    [["Cancel"], ["Remove logo", () => { delete doc.meta.logo; commit(); renderAll(); }, "danger"], ["Change logo", () => $("logofile").click(), "primary"]]);
+}
+svg.addEventListener("click", (e) => { if (e.target.closest("[data-logo]")) logoClick(); });
+svg.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target.closest?.("[data-logo]")) { e.preventDefault(); logoClick(); } });
 svg.addEventListener("pointerdown", (e) => {
+  if (e.target.closest("[data-logo]")) return;
   const port = e.target.closest("[data-port]"), vmEl = e.target.closest("[data-vm]"), box = e.target.closest("[data-dev]");
   if (vmEl) { select({ type: "dev", id: vmEl.dataset.vm }); return; }
   // Cables start only at a port. A click on a port or a box selects the device.
@@ -683,7 +699,7 @@ function help() {
     sec("Enter settings"),
     h("p", {}, "Select a device to fill in its settings, or a virtual machine inside the hypervisor. The Addressing table tab lists every interface and cable you have entered, ready to copy into your Team Log or SSP."),
     sec("Your logo"),
-    h("p", {}, "With nothing selected, the side panel has Company logo. Upload a PNG or JPG and it appears in the top corner of the diagram and in Export PNG. The app shrinks it so the share link stays short."),
+    h("p", {}, "Select Upload logo in the top corner of the diagram and choose a PNG or JPG. Your logo replaces the placeholder and appears in Export PNG. Select it again to change or remove it. The app shrinks it so the share link stays short."),
     sec("Save and share"),
     h("p", {}, "The diagram saves in this browser, but the share link is the real save. After each update, copy the share link and paste it over the old one on your Team Log cover page. Export PNG makes the image for your SSP."),
     h("p", { class: "muted" }, "The app shows only what you enter. It never checks your work against the lab plan, so test on the rack."),
@@ -698,12 +714,7 @@ function renderPanel() {
     kids.push(h("h2", {}, "Your network diagram"),
       h("p", {}, "Record what your team has built on the rack. Each Cyber Hub page says what to add."),
       h("p", {}, "Select a device to enter its settings. To record a cable, drag from a labeled port to the device at the other end."),
-      h("p", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); help(); } }, "How to use the Network Diagram")),
-      h("div", { class: "sec" }, "Company logo (optional)"),
-      doc.meta.logo ? h("img", { src: doc.meta.logo, alt: "Your company logo", class: "logoprev" }) : h("p", { class: "muted" }, "Add your logo and it appears in the top corner of the diagram and in Export PNG."),
-      h("div", { class: "logobtns" },
-        h("button", { class: "small", onclick: () => $("logofile").click() }, doc.meta.logo ? "Change logo" : "Upload logo"),
-        doc.meta.logo ? h("button", { class: "small danger", onclick: () => { delete doc.meta.logo; commit(); renderAll(); } }, "Remove logo") : null));
+      h("p", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); help(); } }, "How to use the Network Diagram")));
   } else if (sel.type === "dev") {
     kids.push(h("h2", {}, s.name), h("p", { class: "kind" }, s.kind === "vm" ? "Virtual machine on the hypervisor" : KINDS[s.kind]));
     kids.push(...editor(s));

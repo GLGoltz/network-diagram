@@ -168,4 +168,12 @@ table.topo.conn td:nth-child(2),table.topo.conn td:nth-child(4),table.topo.conn 
 .pfx>.slash{display:flex;align-items:center;padding:0 7px;border:1px solid var(--border);border-right:0;border-radius:5px 0 0 5px;background:#f1f5f9;color:var(--muted);font-weight:700}
 .pfx>input{border-top-left-radius:0;border-bottom-left-radius:0}
 .logoprev{display:block;max-width:160px;max-height:86px;margin:6px 0 8px;border:1px solid var(--hair);border-radius:5px;background:#fff;padding:4px}
-.logobtns{display:flex;gap:8px}
+.logo-slot{cursor:pointer}
+.logo-slot:focus-visible{outline:none}
+.logo-slot:focus-visible .logo-ph,.logo-slot:focus-visible .logo-hit{stroke:var(--sel);stroke-width:2}
+.logo-ph{fill:#f8fafc;stroke:#94a3b8;stroke-width:1.5;stroke-dasharray:6 4}
+.logo-slot.empty:hover .logo-ph{fill:#eef2f7;stroke:var(--navy)}
+.logo-ph-t{font-size:14px;font-weight:700;fill:var(--navy)}
+.logo-ph-s{font-size:11.5px;fill:var(--muted)}
+.logo-hit{fill:transparent;stroke:none;rx:8}
+.logo-slot:hover .logo-hit{stroke:var(--border);stroke-dasharray:4 3}

@@ -69,7 +69,8 @@ One JSON document, with a `v` (schema version) field. Everything is optional so 
   firewall is wireless (drawn dashed).
 - **meta**: `company`, `updated`, and optional `logo`: a small data URL (PNG, JPEG or WebP, at most 40,000 characters),
   shrunk on upload to about 300 by 160 pixels so the share link stays short. Drawn in the diagram's top-right corner and in
-  Export PNG. Reset diagram keeps the company name and the logo.
+  Export PNG. With no logo, that corner shows an "Upload logo" placeholder on screen only (exports leave it empty);
+  selecting the logo offers Change and Remove. Reset diagram keeps the company name and the logo.
 - **Mask fields** store the prefix length alone, such as `24`. The field shows a fixed `/` in front of the box, and a typed
   `/24` or dotted mask is converted to the prefix.
 

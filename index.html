@@ -165,6 +165,11 @@ table.t.ports th:nth-child(1){width:48px}table.t.ports th:nth-child(2){width:92p
 table.t.ports select{padding:4px 2px}
 table.topo.conn td{font-family:inherit;font-size:13.5px;color:var(--body)}
 table.topo.conn td:nth-child(2),table.topo.conn td:nth-child(4),table.topo.conn td:nth-child(6){font-family:ui-monospace,Consolas,Menlo,monospace;font-size:13px;color:var(--amber)}
+.pfx{display:flex}
+.pfx>.slash{display:flex;align-items:center;padding:0 7px;border:1px solid var(--border);border-right:0;border-radius:5px 0 0 5px;background:#f1f5f9;color:var(--muted);font-weight:700}
+.pfx>input{border-top-left-radius:0;border-bottom-left-radius:0}
+.logoprev{display:block;max-width:160px;max-height:86px;margin:6px 0 8px;border:1px solid var(--hair);border-radius:5px;background:#fff;padding:4px}
+.logobtns{display:flex;gap:8px}
 </style></head><body>
 <header class="bar">
  <div class="brand"><b>Network Diagram</b><small>Cyber Hub</small></div>
@@ -183,6 +188,7 @@ table.topo.conn td:nth-child(2),table.topo.conn td:nth-child(4),table.topo.conn 
     <button id="b-print">Print</button>
    </div></div>
   <input type="file" id="file" accept=".json,application/json" hidden>
+  <input type="file" id="logofile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
  </div>
 </header>
 <div class="savebar"><span id="saved" role="status"></span><span class="sep">·</span><span>The share link is your real save. Copy it after each lab and paste it on your Team Log cover page.</span></div>
@@ -212,6 +218,7 @@ table.topo.conn td:nth-child(2),table.topo.conn td:nth-child(4),table.topo.conn 
 (() => {
 const SCHEMA = 2;
 const KEY = "cyberhub-diagram";
+const LOGO_MAX = 40000; // characters of data URL; the logo rides in the share link, so it stays small
 const VB = { w: 1540, h: 900 };
 const SW_PORTS = ["XG1","XG2","XG3","XG4","XG5","XG6","XG7","XG8","XG9","XG10","XG11","XG12","OOB"];
 const FW_IFS = ["wan1", "internal", "dmz", "guest Wi-Fi"];
@@ -267,7 +274,8 @@ const nicOf = (d) => NIC[d.id] || "NIC";
 function normalize(x) {
   if (!x || typeof x !== "object" || !Array.isArray(x.devices)) throw new Error("not a diagram");
   const d = blankDoc();
-  d.meta = { company: String(x.meta?.company ?? ""), updated: x.meta?.updated ?? null };
+  const logo = typeof x.meta?.logo === "string" && /^data:image\/(png|jpeg|webp);base64,/.test(x.meta.logo) && x.meta.logo.length <= LOGO_MAX ? x.meta.logo : "";
+  d.meta = { company: String(x.meta?.company ?? ""), updated: x.meta?.updated ?? null, ...(logo ? { logo } : {}) };
   const old = new Map(x.devices.filter((v) => v && v.id).map((v) => [String(v.id), v]));
   d.devices = d.devices.map((base) => {
     const v = old.get(base.id);
@@ -589,6 +597,10 @@ function plug(g, a, wifi) {
 
 function drawInto(root, ui) {
   layout();
+  if (doc.meta.logo) {
+    const lw = 150, lh = 80;
+    el("image", { href: doc.meta.logo, x: VB.w - lw - 20, y: 16, width: lw, height: lh, preserveAspectRatio: "xMaxYMin meet", class: "d-logo" }, root);
+  }
   const connected = new Set(doc.links.flatMap((l) => [l.a, l.b]).filter((e) => e.port).map((e) => e.device + "|" + e.port));
   const gd = el("g", {}, root), gl = el("g", {}, root);
   for (const d of doc.devices) {
@@ -762,7 +774,7 @@ function inp(obj, key, { kind, ph, label } = {}) {
     let bad = "";
     if (s && kind === "ip" && !isIP(s) && !isCIDR(s)) bad = "Not an IPv4 address";
     if (s && kind === "cidr" && !isCIDR(s) && !isIP(s)) bad = "Use an address with a prefix, like a.b.c.d/nn";
-    if (s && kind === "mask" && maskToPrefix(s) === null) bad = "Use a prefix like /nn or a dotted mask";
+    if (s && kind === "mask" && maskToPrefix(s) === null) bad = "Use a prefix like 24, or a dotted mask";
     if (s && kind === "num" && !/^\d+$/.test(s)) bad = "Use a number";
     if (s && kind === "list" && !/^\s*\d+(\s*,\s*\d+)*\s*$/.test(s)) bad = "Use numbers separated by commas";
     hint.hidden = !bad; hint.textContent = bad;
@@ -782,6 +794,7 @@ function inp(obj, key, { kind, ph, label } = {}) {
     else obj[key] = final ? s.trim() : s;
   }
   check(String(val));
+  if (kind === "mask") return h("span", { style: "display:block" }, h("span", { class: "pfx" }, h("span", { class: "slash", "aria-hidden": "true" }, "/"), i), hint);
   return h("span", { style: "display:block" }, i, hint);
 }
 const field = (label, input) => h("label", { class: "f" }, h("span", {}, label), input);
@@ -813,7 +826,7 @@ const rerenderForms = () => renderPanel();
 const sec = (s) => h("div", { class: "sec" }, s);
 const addrRow = (o, label = "") => h("div", { class: "row2" },
   field("Address", inp(o, "address", { kind: "ip", ph: "a.b.c.d", label: (label + " address").trim() })),
-  field("Mask", inp(o, "mask", { kind: "mask", ph: "/nn", label: (label + " mask").trim() })));
+  field("Mask", inp(o, "mask", { kind: "mask", ph: "nn", label: (label + " mask").trim() })));
 
 // ------------------------------------------------------------------ editors
 function editor(d) {
@@ -828,7 +841,7 @@ function editor(d) {
   if (d.kind === "switch" || d.kind === "firewall") out.push(field("Hostname", inp(d, "hostname", { ph: "hostname", label: "Hostname" })));
   if (d.kind === "switch") {
     out.push(sec("Out-of-band (OOB) port"), addrRow(d.oob, "OOB"));
-    out.push(sec("VLAN interfaces (SVIs)"), ...rows(d.svis, [{ key: "vlan", label: "VLAN", kind: "num", w: "20%" }, { key: "address", label: "Address", kind: "ip", ph: "a.b.c.d" }, { key: "mask", label: "Mask", kind: "mask", w: "20%", ph: "/nn" }], () => ({ vlan: "", address: "", mask: "" }), "VLAN interface"));
+    out.push(sec("VLAN interfaces (SVIs)"), ...rows(d.svis, [{ key: "vlan", label: "VLAN", kind: "num", w: "20%" }, { key: "address", label: "Address", kind: "ip", ph: "a.b.c.d" }, { key: "mask", label: "Mask", kind: "mask", w: "20%", ph: "nn" }], () => ({ vlan: "", address: "", mask: "" }), "VLAN interface"));
     out.push(sec("Static routes"), ...rows(d.routes, [{ key: "dest", label: "Destination", kind: "cidr", ph: "a.b.c.d/nn" }, { key: "nextHop", label: "Next hop", kind: "ip", ph: "a.b.c.d" }], () => ({ dest: "", nextHop: "" }), "route"));
     out.push(sec("Ports"));
     out.push(h("table", { class: "t ports" }, h("thead", {}, h("tr", {}, ["Port", "Mode", "Untagged", "Tagged", "Off"].map((c) => h("th", {}, c)))),
@@ -879,6 +892,8 @@ function help() {
     h("p", {}, "Drag from a labeled port, such as a switch port or a firewall interface, and drop it on the device at the other end. Dropping on a port records that port. A port that already has a cable gets the new one instead; Undo brings the old one back."),
     sec("Enter settings"),
     h("p", {}, "Select a device to fill in its settings, or a virtual machine inside the hypervisor. The Addressing table tab lists every interface and cable you have entered, ready to copy into your Team Log or SSP."),
+    sec("Your logo"),
+    h("p", {}, "With nothing selected, the side panel has Company logo. Upload a PNG or JPG and it appears in the top corner of the diagram and in Export PNG. The app shrinks it so the share link stays short."),
     sec("Save and share"),
     h("p", {}, "The diagram saves in this browser, but the share link is the real save. After each update, copy the share link and paste it over the old one on your Team Log cover page. Export PNG makes the image for your SSP."),
     h("p", { class: "muted" }, "The app shows only what you enter. It never checks your work against the lab plan, so test on the rack."),
@@ -893,7 +908,12 @@ function renderPanel() {
     kids.push(h("h2", {}, "Your network diagram"),
       h("p", {}, "Record what your team has built on the rack. Each Cyber Hub page says what to add."),
       h("p", {}, "Select a device to enter its settings. To record a cable, drag from a labeled port to the device at the other end."),
-      h("p", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); help(); } }, "How to use the Network Diagram")));
+      h("p", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); help(); } }, "How to use the Network Diagram")),
+      h("div", { class: "sec" }, "Company logo (optional)"),
+      doc.meta.logo ? h("img", { src: doc.meta.logo, alt: "Your company logo", class: "logoprev" }) : h("p", { class: "muted" }, "Add your logo and it appears in the top corner of the diagram and in Export PNG."),
+      h("div", { class: "logobtns" },
+        h("button", { class: "small", onclick: () => $("logofile").click() }, doc.meta.logo ? "Change logo" : "Upload logo"),
+        doc.meta.logo ? h("button", { class: "small danger", onclick: () => { delete doc.meta.logo; commit(); renderAll(); } }, "Remove logo") : null));
   } else if (sel.type === "dev") {
     kids.push(h("h2", {}, s.name), h("p", { class: "kind" }, s.kind === "vm" ? "Virtual machine on the hypervisor" : KINDS[s.kind]));
     kids.push(...editor(s));
@@ -991,6 +1011,27 @@ function setView(v) {
 }
 function renderAll() { $("company").value = doc.meta.company || ""; renderSvg(); renderPanel(); }
 
+// ------------------------------------------------------------------ logo
+// Shrunk to a small image so the share link stays short enough to paste.
+async function readLogo(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+    for (const [mw, mh, type, q] of [[300, 160, "image/webp", 0.85], [300, 160, "image/png"], [220, 120, "image/webp", 0.7], [220, 120, "image/jpeg", 0.8], [160, 86, "image/jpeg", 0.7]]) {
+      const k = Math.min(1, mw / img.naturalWidth, mh / img.naturalHeight);
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+      const ctx = c.getContext("2d");
+      if (type === "image/jpeg") { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); }
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const d = c.toDataURL(type, q);
+      if (d.startsWith("data:" + type) && d.length <= LOGO_MAX / 2) return d;
+    }
+    return null;
+  } finally { URL.revokeObjectURL(url); }
+}
+
 // ------------------------------------------------------------------ share links
 const b64u = (bytes) => { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
 const unb64u = (s) => { const b = atob(s.replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
@@ -1071,6 +1112,14 @@ $("t-table").onclick = () => setView("table");
 $("b-undo").onclick = undo; $("b-redo").onclick = redo;
 $("b-help").onclick = help;
 $("b-share").onclick = share; $("b-png").onclick = exportPng;
+$("logofile").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  let d = null;
+  try { d = await readLogo(f); } catch {}
+  if (!d) { toast("That file couldn't be used as a logo. Try a PNG or JPG image."); return; }
+  doc.meta.logo = d; commit(); renderAll(); toast("Logo added. Copy the share link to keep it.");
+});
 const more = $("more");
 $("b-more").onclick = (e) => { e.stopPropagation(); more.hidden = !more.hidden; $("b-more").setAttribute("aria-expanded", !more.hidden); };
 document.addEventListener("click", () => { more.hidden = true; $("b-more").setAttribute("aria-expanded", false); });
@@ -1084,7 +1133,7 @@ $("file").onchange = async (e) => {
 };
 $("b-print").onclick = () => { setView("canvas"); setTimeout(() => print(), 50); };
 $("b-reset").onclick = () => ask("Reset the diagram?", [h("p", {}, "This clears every cable and setting. Copy the share link first if you want to keep this version."), h("p", { class: "muted" }, "You can undo this.")],
-  [["Cancel"], ["Reset", () => { const co = doc.meta.company; doc = blankDoc(); doc.meta.company = co; sel = null; sharedJSON = null; commit(); renderAll(); }, "danger"]]);
+  [["Cancel"], ["Reset", () => { const co = doc.meta.company, lg = doc.meta.logo; doc = blankDoc(); doc.meta.company = co; if (lg) doc.meta.logo = lg; sel = null; sharedJSON = null; commit(); renderAll(); }, "danger"]]);
 $("company").addEventListener("input", (e) => { doc.meta.company = e.target.value; });
 $("company").addEventListener("change", commit);
 document.addEventListener("keydown", (e) => {

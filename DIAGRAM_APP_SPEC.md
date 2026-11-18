@@ -67,7 +67,11 @@ One JSON document, with a `v` (schema version) field. Everything is optional so 
 - **links[]**: `id`, `a` and `b`, each `{device, port}`. `port` is a switch port name, a firewall interface name, or
   blank for a single-port endpoint. A VM has no link; it rides the hypervisor's link. The guest laptop's link to the
   firewall is wireless (drawn dashed).
-- **meta**: `company`, `updated`.
+- **meta**: `company`, `updated`, and optional `logo`: a small data URL (PNG, JPEG or WebP, at most 40,000 characters),
+  shrunk on upload to about 300 by 160 pixels so the share link stays short. Drawn in the diagram's top-right corner and in
+  Export PNG. Reset diagram keeps the company name and the logo.
+- **Mask fields** store the prefix length alone, such as `24`. The field shows a fixed `/` in front of the box, and a typed
+  `/24` or dotted mask is converted to the prefix.
 
 Typing is forgiving: accept `10.3.20.254/24` in an address field and split it, trim spaces, and show an inline
 format hint for something that isn't an address. A format hint is not an answer.

@@ -270,3 +270,15 @@ Every stopping message in these tests must also pass the section 2 review.
   changes, without nagging.
 - **Scope creep toward a simulator.** The app records and reasons about a configuration. It does not emulate
   devices, generate configurations, or teach commands.
+
+## VLAN colors, unplug buttons and motion (November 18, 2026)
+
+- **VLAN colors.** A VLAN number gets the next free color from a fixed 12-color palette the first time it appears (switch
+  port PVID or tagged list, SVI, VM tag), stored in `meta.vlanColors` so colors never shuffle. Switch ports get a bar
+  (striped for trunks), cables on a switch port take that port's VLAN color (trunks are striped), VMs get a colored edge,
+  and endpoints get a VLAN pill from their access port or, failing that, the SVI subnet their address is in. A legend
+  lists the VLANs with their SVI subnets; hovering one fades everything outside it. Colors come only from what the team
+  entered, never from the lab plan.
+- **Unplug buttons.** Every port with a cable shows a small ×; selecting it removes that cable (Undo restores it).
+- **Motion.** CSS only, off under prefers-reduced-motion, never in exports: a short fade-in on first load, a new cable
+  draws itself in, and the cables of the selected device show traffic flowing.

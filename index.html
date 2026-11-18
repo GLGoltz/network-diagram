@@ -178,6 +178,33 @@ table.topo.conn td:nth-child(2),table.topo.conn td:nth-child(4),table.topo.conn 
 .logo-ph-s{font-size:11.5px;fill:var(--muted)}
 .logo-hit{fill:transparent;stroke:none;rx:8}
 .logo-slot:hover .logo-hit{stroke:var(--border);stroke-dasharray:4 3}
+/* VLAN colors */
+.d-vpill{font:700 10.5px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#fff}
+.d-legh{font:700 12px system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:#0f172a;letter-spacing:.04em;text-transform:uppercase}
+.d-legt{font:12.5px ui-monospace,Consolas,Menlo,monospace;fill:#334155}
+.leg{cursor:default}
+.leg:focus-visible{outline:none}.leg:focus-visible .d-legt{text-decoration:underline}
+#svg [data-vl],#svg .dev{transition:opacity .2s ease}
+#svg.vfocus .lk:not(.hl),#svg.vfocus .dev:not(.hl):not(:has(.hl)),#svg.vfocus .k-switch .port:not(.hl),#svg.vfocus .vm:not(.hl),#svg.vfocus .leg:not(.hl){opacity:.16}
+/* Motion: light and CSS-only */
+.d-flow{fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-dasharray:1.5 18;opacity:0;pointer-events:none}
+.lk.busy .d-flow{opacity:.95;animation:flow 1.1s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-19.5}}
+.lk.fresh .d-link:not(.stripe){stroke-dasharray:2000;stroke-dashoffset:2000;animation:drawin .7s ease-out forwards}
+.lk.fresh .d-link.stripe{animation:fadein .5s ease-out}
+@keyframes drawin{to{stroke-dashoffset:0}}
+#svg.intro .dev,#svg.intro .lk,#svg.intro .legend{animation:fadein .5s ease-out both}
+#svg.intro .dev:nth-child(2n){animation-delay:.06s}#svg.intro .dev:nth-child(3n){animation-delay:.12s}#svg.intro .lk{animation-delay:.2s}
+@keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+#svg.intro .dev{animation-name:fadein2}
+@keyframes fadein2{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){#svg *,#svg{animation:none!important;transition:none!important}}
+/* Unplug buttons */
+.unplug{cursor:pointer}
+.unplug circle{fill:#fff;stroke:#94a3b8;stroke-width:1.2}
+.unplug path{stroke:#64748b;stroke-width:1.6;stroke-linecap:round}
+.unplug:hover circle{fill:#fee2e2;stroke:#b91c1c}.unplug:hover path{stroke:#b91c1c}
+.unplug:focus-visible{outline:none}.unplug:focus-visible circle{stroke:var(--sel);stroke-width:2}
 </style></head><body>
 <header class="bar">
  <div class="brand"><b>Network Diagram</b><small>Cyber Hub</small></div>
@@ -283,7 +310,9 @@ function normalize(x) {
   if (!x || typeof x !== "object" || !Array.isArray(x.devices)) throw new Error("not a diagram");
   const d = blankDoc();
   const logo = typeof x.meta?.logo === "string" && /^data:image\/(png|jpeg|webp);base64,/.test(x.meta.logo) && x.meta.logo.length <= LOGO_MAX ? x.meta.logo : "";
-  d.meta = { company: String(x.meta?.company ?? ""), updated: x.meta?.updated ?? null, ...(logo ? { logo } : {}) };
+  const vc = {};
+  if (x.meta?.vlanColors && typeof x.meta.vlanColors === "object") for (const [k, v] of Object.entries(x.meta.vlanColors)) if (/^\d{1,4}$/.test(k) && Number.isInteger(v) && v >= 0 && v < 64) vc[k] = v;
+  d.meta = { company: String(x.meta?.company ?? ""), updated: x.meta?.updated ?? null, ...(logo ? { logo } : {}), ...(Object.keys(vc).length ? { vlanColors: vc } : {}) };
   const old = new Map(x.devices.filter((v) => v && v.id).map((v) => [String(v.id), v]));
   d.devices = d.devices.map((base) => {
     const v = old.get(base.id);
@@ -335,6 +364,7 @@ let hist = [], hi = -1, sharedJSON = null, saveFailed = false;
 const snapshot = () => JSON.stringify(doc);
 const contentOf = (j) => { try { const o = JSON.parse(j); delete o.meta.updated; return JSON.stringify(o); } catch { return j; } };
 function commit() {
+  assignVlanColors();
   const s = snapshot();
   if (hist[hi] === s) return;
   hist = hist.slice(0, hi + 1); hist.push(s);
@@ -365,6 +395,65 @@ const hasContent = (o = doc) => o.links.length > 0 || o.devices.some((d) => d.ad
 let sel = null; // {type:'dev'|'link', id}
 const findSel = () => sel && (sel.type === "dev" ? dev(sel.id) : doc.links.find((l) => l.id === sel.id));
 function select(s) { sel = s; renderSvg(); renderPanel(); }
+
+// ------------------------------------------------------------------ VLAN colors
+// Each VLAN number gets the next free color the first time it appears and keeps it, so colors never shuffle as
+// a team adds VLANs. Colors are only ever derived from what the team entered.
+const VPAL = ["#0d9488", "#ea580c", "#7c3aed", "#db2777", "#ca8a04", "#16a34a", "#0891b2", "#dc2626", "#4f46e5", "#92400e", "#65a30d", "#475569"];
+const vnum = (v) => { const s = String(v ?? "").trim(); return /^\d{1,4}$/.test(s) && +s >= 1 && +s <= 4094 ? String(+s) : ""; };
+function portVlans(p) {
+  if (!p || p.shutdown) return [];
+  if (p.mode === "access") return [vnum(p.pvid)].filter(Boolean);
+  if (p.mode === "trunk") return [...new Set([vnum(p.pvid), ...(p.tagged || []).map(vnum)].filter(Boolean))];
+  return [];
+}
+const ip2n = (a) => a.split(".").reduce((n, o) => n * 256 + +o, 0);
+function inSub(addr, base, mask) {
+  const p = maskToPrefix(mask);
+  if (!isIP(addr) || !isIP(base) || p === null) return false;
+  const k = 2 ** (32 - +p);
+  return Math.floor(ip2n(addr) / k) === Math.floor(ip2n(base) / k);
+}
+function netOf(addr, mask) {
+  const p = maskToPrefix(mask);
+  if (!isIP(addr) || p === null) return "";
+  const k = 2 ** (32 - +p), n = Math.floor(ip2n(addr) / k) * k;
+  return [24, 16, 8, 0].map((sh) => Math.floor(n / 2 ** sh) % 256).join(".") + "/" + p;
+}
+function vlansInUse() {
+  const sw = dev("sw"), set = new Set();
+  sw.ports.forEach((p) => portVlans(p).forEach((v) => set.add(v)));
+  sw.svis.forEach((v) => vnum(v.vlan) && set.add(vnum(v.vlan)));
+  doc.devices.forEach((d) => d.kind === "vm" && vnum(d.vlanTag) && set.add(vnum(d.vlanTag)));
+  return [...set].sort((a, b) => a - b);
+}
+// Hands out colors to new VLANs. Returns true if the document changed.
+function assignVlanColors() {
+  const vc = doc.meta.vlanColors || {}, used = new Set(Object.values(vc));
+  let changed = false;
+  for (const v of vlansInUse()) if (!(v in vc)) {
+    let i = 0; while (used.has(i) && i < VPAL.length) i++;
+    if (i >= VPAL.length) i = Object.keys(vc).length % VPAL.length;
+    vc[v] = i; used.add(i); changed = true;
+  }
+  if (changed) doc.meta.vlanColors = vc;
+  return changed;
+}
+const vcolor = (v) => { const i = doc.meta.vlanColors?.[v]; return i === undefined ? "#64748b" : VPAL[i % VPAL.length]; };
+// The VLANs a cable carries: those of the switch port at either end.
+function linkVlans(l) {
+  for (const e of [l.a, l.b]) if (e.device === "sw" && e.port) return portVlans(dev("sw").ports.find((p) => p.name === e.port));
+  return [];
+}
+// A device's own VLAN: the access port it plugs into, else the SVI subnet its address falls in.
+function devVlan(d) {
+  if (d.kind === "vm") return vnum(d.vlanTag);
+  if (!["laptop", "nas", "pi", "hypervisor"].includes(d.kind) || ["isplap", "guest"].includes(d.id)) return "";
+  const l = doc.links.find((x) => (x.a.device === d.id && x.b.device === "sw") || (x.b.device === d.id && x.a.device === "sw"));
+  if (l) { const v = linkVlans(l); if (v.length === 1) return v[0]; }
+  if (d.address) { const s = dev("sw").svis.find((v) => vnum(v.vlan) && inSub(d.address, v.address, v.mask)); if (s) return vnum(s.vlan); }
+  return "";
+}
 
 // ------------------------------------------------------------------ drawing
 // The layout follows the lab's traffic path, top to bottom: provider, firewall, core switch, then the hosts.
@@ -635,6 +724,13 @@ function drawInto(root, ui) {
         const r = portRect(d, p.name), [mode, vl] = portMode(p), on = connected.has(d.id + "|" + p.name);
         const pg = el("g", { class: "port" + (p.shutdown ? " off" : "") + (on ? " on" : ""), ...(ui ? { "data-port": p.name, "data-pdev": d.id } : {}) }, g);
         el("rect", { x: r.x - d.x, y: r.y - d.y, width: r.w, height: r.h, rx: 5, class: "d-port" }, pg);
+        const pv = portVlans(p);
+        if (pv.length) {
+          pg.setAttribute("data-vl", pv.join(" "));
+          const bw = (r.w - 8) / pv.length;
+          pv.forEach((v, i) => el("rect", { x: r.x - d.x + 4 + i * bw, y: r.y - d.y + r.h - 2.5, width: bw - (pv.length > 1 ? 1 : 0), height: 5, rx: 1.5, fill: vcolor(v) }, pg));
+        }
+        if (ui && on) unplugBtn(g, r.x - d.x + r.w - 2, r.y - d.y + 2, d.id, p.name, `${d.name} ${p.name}`);
         text(pg, r.cx - d.x, r.y - d.y + 19, "d-pname", p.name, "middle");
         if (mode) text(pg, r.cx - d.x, r.y - d.y + 33, "d-pmode", mode, "middle");
         if (vl) text(pg, r.cx - d.x, r.y - d.y + 46, "d-pvl", vl, "middle");
@@ -642,6 +738,13 @@ function drawInto(root, ui) {
       continue;
     }
     const alone = !lines.length && d.kind !== "hypervisor";
+    const dv = devVlan(d);
+    if (dv) {
+      g.setAttribute("data-vl", dv);
+      const pw = 16 + dv.length * 7.5;
+      el("rect", { x: w - pw - 8, y: 8, width: pw, height: 17, rx: 8.5, fill: vcolor(dv) }, g);
+      text(g, w - pw / 2 - 8, 20.5, "d-vpill", dv, "middle");
+    }
     text(g, w / 2, alone ? h / 2 + 6 : 30, "d-name", d.name, "middle");
     lines.forEach((s, i) => text(g, w / 2, 53 + i * 19, "d-val", s, "middle"));
     if (d.kind === "hypervisor") {
@@ -650,10 +753,12 @@ function drawInto(root, ui) {
         const vg = el("g", { class: "vm" + (ui && sel?.type === "dev" && sel.id === v.id ? " sel" : ""), "data-vm": v.id,
           ...(ui ? { tabindex: 0, role: "button", "aria-label": `${v.name}, virtual machine` } : {}) }, g);
         el("rect", { x: 12, y, width: w - 24, height: VM_H, rx: 6, class: "d-vm" }, vg);
+        const tv = vnum(v.vlanTag);
+        if (tv) { vg.setAttribute("data-vl", tv); el("rect", { x: 13, y: y + 1, width: 5, height: VM_H - 2, rx: 2, fill: vcolor(tv) }, vg); }
         const det = [v.vlanTag ? "tag " + v.vlanTag : "", withPrefix(v.address, v.mask) || (v.dhcp ? "DHCP" : "")].filter(Boolean).join("  ");
-        text(vg, 22, y + (det ? 17 : 26), "d-vmname", v.name, "start");
+        text(vg, 24, y + (det ? 17 : 26), "d-vmname", v.name, "start");
         if (v.hostname) text(vg, w - 22, y + (det ? 17 : 26), "d-vmhost", v.hostname, "end");
-        if (det) text(vg, 22, y + 34, "d-val", det, "start");
+        if (det) text(vg, 24, y + 34, "d-val", det, "start");
         y += VM_H + 6;
       }
     }
@@ -663,18 +768,47 @@ function drawInto(root, ui) {
       const tg = el("g", { class: "port" + (on ? " on" : ""), ...(ui ? { "data-port": name, "data-pdev": d.id } : {}) }, g);
       el("rect", { x: t.x - d.x, y: t.y - d.y, width: t.w, height: t.h, rx: 4, class: "d-tab" }, tg);
       text(tg, t.x - d.x + t.w / 2, t.y - d.y + 15, "d-tabname", name, "middle");
+      if (ui && on) unplugBtn(g, t.x - d.x + t.w - 1, t.y - d.y + 1, d.id, single ? "" : name, `${d.name} ${name}`);
     }
   }
   for (const l of doc.links) {
     const r = routes.get(l.id);
     if (!r) continue;
     const path = pathOf(r.pts), wifi = isWifi(l);
-    const g = el("g", { class: "lk" + (ui && sel?.type === "link" && sel.id === l.id ? " sel" : ""), "data-link": l.id }, gl);
+    const lv = wifi ? [] : linkVlans(l);
+    const busy = ui && sel && (sel.type === "link" ? sel.id === l.id : [l.a.device, l.b.device].includes(sel.id) || [l.a.device, l.b.device].includes(dev(sel.id)?.host));
+    const g = el("g", { class: "lk" + (ui && sel?.type === "link" && sel.id === l.id ? " sel" : "") + (ui && l.id === freshLink ? " fresh" : "") + (busy ? " busy" : ""),
+      "data-link": l.id, ...(lv.length ? { "data-vl": lv.join(" ") } : {}) }, gl);
     if (!wifi) el("path", { d: path, class: "d-case" }, g);
-    el("path", { d: path, class: "d-link" + (wifi ? " wifi" : "") }, g);
+    if (lv.length === 1) el("path", { d: path, class: "d-link", style: `stroke:${vcolor(lv[0])}` }, g);
+    else if (lv.length > 1) {
+      // A trunk: one dash per VLAN, repeating along the cable.
+      const seg = 12, gap = seg * (lv.length - 1);
+      lv.forEach((v, i) => el("path", { d: path, class: "d-link stripe", style: `stroke:${vcolor(v)};stroke-dasharray:${seg} ${gap};stroke-dashoffset:${-i * seg};stroke-linecap:butt` }, g));
+    } else el("path", { d: path, class: "d-link" + (wifi ? " wifi" : "") }, g);
+    if (ui) el("path", { d: path, class: "d-flow" }, g);
     r.ends.forEach((a) => plug(g, a, wifi));
     if (ui) el("path", { d: path, class: "hit" }, g);
   }
+  drawLegend(root, ui);
+}
+function unplugBtn(g, cx, cy, devId, port, label) {
+  const b = el("g", { class: "unplug", "data-unplug": devId + "|" + port, tabindex: 0, role: "button", "aria-label": "Remove the cable from " + label }, g);
+  el("circle", { cx, cy, r: 7 }, b);
+  el("path", { d: `M${cx - 2.6},${cy - 2.6}L${cx + 2.6},${cy + 2.6}M${cx + 2.6},${cy - 2.6}L${cx - 2.6},${cy + 2.6}` }, b);
+}
+function drawLegend(root, ui) {
+  const vs = vlansInUse();
+  if (!vs.length) return;
+  const x = dev("isplap").x + SIDE_W + 70, y0 = hasContent() ? 92 : 170, step = vs.length > 9 ? 17 : 21;
+  const g = el("g", { class: "legend" }, root);
+  text(g, x, y0, "d-legh", "VLANs", "start");
+  vs.forEach((v, i) => {
+    const y = y0 + 12 + i * step, svi = dev("sw").svis.find((s) => vnum(s.vlan) === v);
+    const r = el("g", { class: "leg", "data-leg": v, ...(ui ? { tabindex: 0, role: "button", "aria-label": `VLAN ${v}. Hover to highlight it.` } : {}) }, g);
+    el("rect", { x, y, width: 14, height: 14, rx: 3, fill: vcolor(v) }, r);
+    text(r, x + 22, y + 11.5, "d-legt", "VLAN " + v + (svi && svi.address ? "   " + netOf(svi.address, svi.mask) : ""), "start");
+  });
 }
 function renderSvg() {
   svg.replaceChildren();
@@ -704,9 +838,30 @@ function logoClick() {
     [["Cancel"], ["Remove logo", () => { delete doc.meta.logo; commit(); renderAll(); }, "danger"], ["Change logo", () => $("logofile").click(), "primary"]]);
 }
 svg.addEventListener("click", (e) => { if (e.target.closest("[data-logo]")) logoClick(); });
+function unplug(key) {
+  const [id, port] = key.split("|"), d = dev(id);
+  const hit = (e) => e.device === id && (!port || !portsFor(d).length || e.port === port);
+  const gone = doc.links.filter((l) => hit(l.a) || hit(l.b));
+  if (!gone.length) return;
+  doc.links = doc.links.filter((l) => !gone.includes(l));
+  if (sel?.type === "link" && gone.some((l) => l.id === sel.id)) sel = null;
+  commit(); renderSvg(); renderPanel();
+  toast(gone.length > 1 ? "Cables removed. Undo brings them back." : "Cable removed. Undo brings it back.");
+}
+svg.addEventListener("click", (e) => { const u = e.target.closest("[data-unplug]"); if (u) unplug(u.dataset.unplug); });
+svg.addEventListener("keydown", (e) => { const u = e.target.closest?.("[data-unplug]"); if (u && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); unplug(u.dataset.unplug); } });
+function focusVlan(v) {
+  svg.classList.toggle("vfocus", !!v);
+  svg.querySelectorAll("[data-vl]").forEach((n) => n.classList.toggle("hl", !!v && n.dataset.vl.split(" ").includes(v)));
+  svg.querySelectorAll("[data-leg]").forEach((n) => n.classList.toggle("hl", n.dataset.leg === v));
+}
+svg.addEventListener("pointerover", (e) => { const l = e.target.closest?.("[data-leg]"); if (l) focusVlan(l.dataset.leg); });
+svg.addEventListener("pointerout", (e) => { const l = e.target.closest?.("[data-leg]"); if (l && !l.contains(e.relatedTarget)) focusVlan(null); });
+svg.addEventListener("focusin", (e) => { const l = e.target.closest?.("[data-leg]"); if (l) focusVlan(l.dataset.leg); });
+svg.addEventListener("focusout", (e) => { if (e.target.closest?.("[data-leg]")) focusVlan(null); });
 svg.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target.closest?.("[data-logo]")) { e.preventDefault(); logoClick(); } });
 svg.addEventListener("pointerdown", (e) => {
-  if (e.target.closest("[data-logo]")) return;
+  if (e.target.closest("[data-logo]") || e.target.closest("[data-unplug]")) { e.stopPropagation(); return; }
   const port = e.target.closest("[data-port]"), vmEl = e.target.closest("[data-vm]"), box = e.target.closest("[data-dev]");
   if (vmEl) { select({ type: "dev", id: vmEl.dataset.vm }); return; }
   // Cables start only at a port. A click on a port or a box selects the device.
@@ -759,13 +914,15 @@ function occupied(end, except) {
   if (!single && !end.port) return [];
   return doc.links.filter((l) => l !== except && [l.a, l.b].some((x) => x.device === end.device && (single || x.port === end.port)));
 }
+let freshLink = null, freshT;
 function addLink(a, b) {
   const auto = (e) => { const d = dev(e.device); if (portsFor(d).length && !e.port) { const free = portsFor(d).find((p) => !occupied({ device: d.id, port: p }).length); if (d.kind === "isp" && free) e.port = free; } };
   auto(a); auto(b);
   const gone = [...new Set([...occupied(a), ...occupied(b)])];
   doc.links = doc.links.filter((l) => !gone.includes(l));
   const l = { id: newId("l"), a: { ...a }, b: { ...b } };
-  doc.links.push(l); commit(); select({ type: "link", id: l.id });
+  doc.links.push(l); freshLink = l.id; clearTimeout(freshT); freshT = setTimeout(() => { freshLink = null; }, 900);
+  commit(); select({ type: "link", id: l.id });
   const needPort = (e) => portsFor(dev(e.device)).length && !e.port;
   toast(gone.length ? "Replaced the old cable. Undo brings it back." : needPort(a) || needPort(b) ? "Cable recorded. Choose the port it uses." : "Cable recorded.");
 }
@@ -916,6 +1073,10 @@ function help() {
     h("p", {}, "Drag from a labeled port, such as a switch port or a firewall interface, and drop it on the device at the other end. Dropping on a port records that port. A port that already has a cable gets the new one instead; Undo brings the old one back."),
     sec("Enter settings"),
     h("p", {}, "Select a device to fill in its settings, or a virtual machine inside the hypervisor. The Addressing table tab lists every interface and cable you have entered, ready to copy into your Team Log or SSP."),
+    sec("See your VLANs"),
+    h("p", {}, "Each VLAN gets its own color the first time it appears on a switch port, a VLAN interface or a VM tag. Ports, cables, VMs and devices take the color of their VLAN, and a trunk cable is striped with every VLAN it carries. Point at a VLAN in the legend to fade out everything outside it."),
+    sec("Remove a cable"),
+    h("p", {}, "Select the small × on a port that has a cable, or select the cable and choose Delete cable. Undo brings it back."),
     sec("Your logo"),
     h("p", {}, "Select Upload logo in the top corner of the diagram and choose a PNG or JPG. Your logo replaces the placeholder and appears in Export PNG. Select it again to change or remove it. The app shrinks it so the share link stays short."),
     sec("Save and share"),
@@ -1028,7 +1189,9 @@ function setView(v) {
   $("v-canvas").hidden = v !== "canvas"; tableView.hidden = v !== "table";
   renderSvg(); renderPanel();
 }
-function renderAll() { $("company").value = doc.meta.company || ""; renderSvg(); renderPanel(); }
+let introDone = false;
+function renderAll() {
+  if (!introDone) { introDone = true; svg.classList.add("intro"); setTimeout(() => svg.classList.remove("intro"), 1200); } $("company").value = doc.meta.company || ""; renderSvg(); renderPanel(); }
 
 // ------------------------------------------------------------------ logo
 // Shrunk to a small image so the share link stays short enough to paste.
